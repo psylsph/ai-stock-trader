@@ -1,0 +1,32 @@
+# Core
+pydantic>=2.0
+pydantic-settings
+pyyaml
+
+# Database
+sqlalchemy>=2.0
+alembic
+aiosqlite
+
+# Network
+aiohttp
+feedparser
+
+# Market Data
+yfinance
+pandas
+numpy
+
+# AI
+autogen-agentchat>=0.2
+ollama
+httpx
+openai
+
+# Technical Analysis
+pandas-ta
+
+# Utilities
+python-dotenv
+structlog
+schedule
