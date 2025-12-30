@@ -1,6 +1,8 @@
+"""Configuration settings for the AI Stock Trader application."""
+
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+
 
 class Settings(BaseSettings):
     # AI Configuration
@@ -8,15 +10,15 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "x-ai/grok-4"
     OLLAMA_HOST: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2:3b"
-    
+
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///trading.db"
-    
+
     # Trading Configuration
     TRADING_MODE: str = "paper"  # "paper" or "live"
     CHECK_INTERVAL_SECONDS: int = 300
     INITIAL_BALANCE: float = 10000.0
-    
+
     # Market Data
     MARKET_DATA_API_KEY: Optional[str] = None
     RSS_FEEDS: list[str] = [

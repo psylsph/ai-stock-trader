@@ -1,3 +1,25 @@
+"""AI prompts for trading analysis."""
+
+import os
+
+SYSTEM_PROMPT_PATH = os.path.join(
+    os.path.dirname(__file__), '..', 'prompts', 'system-prompt.md'
+)
+
+def _load_system_prompt() -> str:
+    """Load the system prompt from the markdown file."""
+    try:
+        with open(SYSTEM_PROMPT_PATH, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Extract just the prompt content (remove the role/objective sections headers if needed)
+            # For now, we'll use the full content as the system prompt
+            return content
+    except FileNotFoundError:
+        # Fallback if file doesn't exist
+        return """You are the Chief UK Market Strategist & Senior Equity Trader with deep expertise in the London Stock Exchange (LSE)."""
+
+SYSTEM_PROMPT = _load_system_prompt()
+
 REMOTE_MARKET_ANALYSIS_PROMPT = """
 You are an AI trading analyst for the London Stock Exchange.
 
