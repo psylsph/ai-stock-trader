@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 from src.database.repository import DatabaseRepository
@@ -66,7 +66,7 @@ class PaperTrader(Broker):
             action="BUY",
             quantity=quantity,
             price=price,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         await self.repo.log_trade(trade)
         
@@ -78,12 +78,12 @@ class PaperTrader(Broker):
         # Let's return the Order and let PositionManager handle DB updates for positions.
         
         return Order(
-            id=f"paper-{datetime.now().timestamp()}",
+            id=f"paper-{datetime.now(timezone.utc).timestamp()}",
             symbol=symbol,
             action="BUY",
             quantity=quantity,
             price=price,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
 
     async def sell(self, symbol: str, quantity: float, price: float) -> Order:
@@ -97,15 +97,15 @@ class PaperTrader(Broker):
             action="SELL",
             quantity=quantity,
             price=price,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
         await self.repo.log_trade(trade)
         
         return Order(
-            id=f"paper-{datetime.now().timestamp()}",
+            id=f"paper-{datetime.now(timezone.utc).timestamp()}",
             symbol=symbol,
             action="SELL",
             quantity=quantity,
             price=price,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )

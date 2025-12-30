@@ -1,0 +1,14 @@
+services:
+  trading-bot:
+    build: .
+    container_name: ai-stock-trader
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/trading.db
+      - PORTFOLIO_FILE=/app/data/portfolio.json
+    restart: unless-stopped

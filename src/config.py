@@ -6,10 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # AI Configuration
-    OPENROUTER_API_KEY: str
+    OPENROUTER_API_KEY: str = ""
     OPENROUTER_MODEL: str = "x-ai/grok-4"
-    OLLAMA_HOST: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama3.2:3b"
+
+    # LM Studio Configuration
+    LM_STUDIO_API_URL: str = "http://localhost:1234/v1"
+    LM_STUDIO_MODEL: str = "zai-org/GLM-4.6V-Flash"
+    ENABLE_TOOLS: bool = True
+    ENABLE_VISION: bool = True
 
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///trading.db"
@@ -22,8 +26,10 @@ class Settings(BaseSettings):
     # Market Data
     MARKET_DATA_API_KEY: Optional[str] = None
     RSS_FEEDS: list[str] = [
-        "https://www.ft.com/rss/home/international",
-        "https://money.com/money/feed/"
+        "https://news.yahoo.com/rss/uk",
+        "https://finance.yahoo.com/news/rssindex",
+        "https://feeds.bbci.co.uk/news/uk/rss.xml",
+        "https://feeds.bbci.co.uk/news/business/rss.xml"
     ]
 
     model_config = SettingsConfigDict(

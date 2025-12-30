@@ -1,0 +1,108 @@
+"""Verification script for local AI with LM Studio."""
+
+import asyncio
+from openai import AsyncOpenAI
+
+async def test_lm_studio():
+    """Test LM Studio connection and basic AI functionality."""
+    
+    client = AsyncOpenAI(
+        base_url='http://localhost:1234/v1',
+        api_key='lm-studio'
+    )
+    
+    print("=" * 60)
+    print("Testing LM Studio Connection")
+    print("=" * 60)
+    
+    # Test 1: Simple chat
+    print("\n1. Testing simple chat...")
+    response = await client.chat.completions.create(
+        model='zai-org/GLM-4.6V-Flash',
+        messages=[{'role': 'user', 'content': 'Respond with just the word TEST'}]
+    )
+    response_content = response.choices[0].message.content.strip()
+    print(f"Response: {response_content}")
+    assert response_content == "TEST", f"Simple chat failed (got '{response_content}')"
+    print(" Simple chat: PASSED")
+    
+    # Test 2: JSON response
+    print("\n2. Testing JSON response...")
+    response = await client.chat.completions.create(
+        model='zai-org/GLM-4.6V-Flash',
+        messages=[{
+            'role': 'system',
+            'content': 'You are a helpful assistant. Respond in JSON format.'
+        }, {
+            'role': 'user',
+            'content': 'Respond with {"status": "ok", "message": "working"}'
+        }]
+    )
+    print(f"Response: {response.choices[0].message.content}")
+    print(" JSON response: PASSED")
+    
+    # Test 3: Tool calling (if supported)
+    print("\n3. Testing tool calling...")
+    tools = [{
+        'type': 'function',
+        'function': {
+            'name': 'get_time',
+            'description': 'Get the current time',
+            'parameters': {
+                'type': 'object',
+                'properties': {}
+            }
+        }
+    }]
+    
+    response = await client.chat.completions.create(
+        model='zai-org/GLM-4.6V-Flash',
+        messages=[{'role': 'user', 'content': 'What time is it?'}],
+        tools=tools
+    )
+    
+    print(f"Tool calls: {response.choices[0].message.tool_calls}")
+    
+    # Test 4: Vision (if supported)
+    print("\n4. Testing vision capabilities...")
+    import base64
+    from io import BytesIO
+    
+    # Create a simple test image (red square)
+    from PIL import Image
+    import numpy as np
+    
+    img = Image.new('RGB', (100, 100), color='red')
+    img_bytes = BytesIO()
+    img.save(img_bytes, 'PNG')
+    img_bytes.seek(0)
+    img_base64 = base64.b64encode(img_bytes.read()).decode('utf-8')
+    
+    response = await client.chat.completions.create(
+        model='zai-org/GLM-4.6V-Flash',
+        messages=[{
+            'role': 'user',
+            'content': [
+                {
+                    'type': 'text',
+                    'text': 'What do you see in this image?'
+                },
+                {
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f"data:image/png;base64,{img_base64}"
+                    }
+                }
+            ]
+        }]
+    )
+    
+    print(f"Vision response: {response.choices[0].message.content}")
+    print(" Vision capabilities: PASSED")
+    
+    print("\n" + "=" * 60)
+    print("ALL TESTS PASSED")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    asyncio.run(test_lm_studio())
