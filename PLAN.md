@@ -2,10 +2,14 @@
 
 https://news.yahoo.com/rss/uk
 https://finance.yahoo.com/news/rssindex
+https://feeds.bbci.co.uk/news/uk/rss.xml
+https://feeds.bbci.co.uk/news/business/rss.xml
 
-# News Articles
+# News Ticker Specific Articles
 
 https://finance.yahoo.com/quote/<SYMBOL NAME>/news/
+
+# Pricing History
 https://finance.yahoo.com/quote/<SYMBOL NAME>/history/
 
 # Chart Configurations
