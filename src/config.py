@@ -11,9 +11,14 @@ class Settings(BaseSettings):
 
     # LM Studio Configuration
     LM_STUDIO_API_URL: str = "http://localhost:1234/v1"
-    LM_STUDIO_MODEL: str = "zai-org/GLM-4.6V-Flash"
+    LM_STUDIO_MODEL: str = "zai-org/glm-4.6v-flash"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
+    
+    # Streaming & Retry Configuration
+    USE_STREAMING: bool = True
+    AI_MAX_RETRIES: int = 3
+    AI_RETRY_DELAY_SECONDS: float = 1.0
 
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///trading.db"

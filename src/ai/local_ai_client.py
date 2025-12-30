@@ -1,15 +1,14 @@
-"""Client for interacting with LM Studio via OpenAI-compatible API."""
-
+import asyncio
 import json
-import base64
+import random
 from datetime import datetime, timezone
-from typing import Dict, Any, List, TYPE_CHECKING
+from typing import Dict, Any, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .tools import TradingTools
 
 try:
-    from openai import AsyncOpenAI  # pylint: disable=import-error
+    from openai import AsyncOpenAI
 except ImportError:
     AsyncOpenAI = None
 
@@ -34,11 +33,78 @@ class LocalAIClient:
             raise ImportError("openai library is required. Install with: pip install openai")
         self.client = AsyncOpenAI(
             base_url=api_url,
-            api_key="lm-studio"  # LM Studio doesn't require API key
+            api_key="lm-studio"
         )
         self.model = model
 
-    async def analyze_market_with_tools(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def _call_with_retry(
+        self,
+        func,
+        max_retries: int = 3,
+        base_delay: float = 1.0
+    ):
+        """Wrapper to retry API calls with exponential backoff."""
+        for attempt in range(max_retries):
+            try:
+                if asyncio.iscoroutinefunction(func):
+                    return await func()
+                else:
+                    result = func()
+                    if asyncio.iscoroutine(result):
+                        return await result
+                    return result
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"  [Retry {attempt + 1}/{max_retries} in {delay:.1f}s: {str(e)[:50]}...", end='', flush=True)
+                    await asyncio.sleep(delay)
+                else:
+                    print()
+                    raise
+
+    async def _stream_chat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]] = None,
+        print_tokens: bool = True
+    ) -> Tuple[str, List]:
+        """Stream chat completion and print tokens as they arrive."""
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True
+        }
+        if tools:
+            kwargs["tools"] = tools
+        
+        stream = await self.client.chat.completions.create(**kwargs)
+        
+        full_content = ""
+        tool_calls_buffer = []
+        
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                    
+                delta = chunk.choices[0].delta
+                
+                if delta.content:
+                    full_content += delta.content
+                    if print_tokens:
+                        print(delta.content, end='', flush=True)
+                
+                if delta.tool_calls:
+                    tool_calls_buffer.extend(delta.tool_calls or [])
+                    
+        except Exception as e:
+            print(f"  [Streaming Error: {e}]")
+        
+        if print_tokens:
+            print()
+        return full_content, tool_calls_buffer
+
+    async def analyze_market_with_tools(
         self,
         portfolio_summary: str,
         market_status: str,
@@ -46,18 +112,9 @@ class LocalAIClient:
         tools: 'TradingTools',
         max_tool_calls: int = 10
     ) -> Dict[str, Any]:
-        """Analyze market using local AI with tools.
+        """Analyze market using local AI with tools."""
+        print("\n[Local AI Analyzing Market with Tools...]")
 
-        Args:
-            portfolio_summary: Summary of current portfolio.
-            market_status: Current market status.
-            rss_news_summary: Summary from RSS feeds.
-            tools: TradingTools instance with tool execution capabilities.
-            max_tool_calls: Maximum number of tool iterations.
-
-        Returns:
-            Dictionary containing analysis and recommendations.
-        """
         messages = [
             {
                 "role": "system",
@@ -79,49 +136,64 @@ class LocalAIClient:
         reasoning_chain = []
 
         while tool_call_count < max_tool_calls:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=tool_schemas
+            print(f"\n[Iteration {tool_call_count + 1}]", end='', flush=True)
+
+            full_content, tool_calls = await self._call_with_retry(
+                lambda: self._stream_chat_completion(
+                    messages=messages,
+                    tools=tool_schemas,
+                    print_tokens=True
+                )
             )
-
-            message = response.choices[0].message
-            content = message.content or ""
-            tool_calls = message.tool_calls or []
-
+            
+            reasoning_chain.append(f"AI reasoning: {full_content}")
+            
             if not tool_calls:
                 break
-
-            reasoning_chain.append(f"AI reasoning: {content}")
-
+            
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
+                print(f"\n[Tool Call: {function_name}]", end='', flush=True)
+                
                 arguments = json.loads(tool_call.function.arguments)
 
                 tool_result = await tools.execute_tool(function_name, arguments)
 
                 if "chart_path" in tool_result and tool_result.get("analysis_needed"):
+                    print("[Running vision analysis...]", end='', flush=True)
                     chart_path = tool_result["chart_path"]
                     chart_base64 = tools.chart_fetcher.image_to_base64(chart_path)
                     
-                    # Vision analysis using LM Studio's multimodal support
                     vision_response = await self.client.chat.completions.create(
                         model=self.model,
-                        messages=[{
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "Analyze this stock chart for trading signals, trends, support/resistance levels, and potential entry/exit points."
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": chart_base64}
-                                }
-                            ]
-                        }]
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Analyze this stock chart for trading signals, trends, support/resistance levels, and potential entry/exit points."
+                                    },
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": chart_base64}
+                                    }
+                                ]
+                            }
+                        ]
                     )
-                    tool_result["vision_analysis"] = vision_response.choices[0].message.content
+                    
+                    vision_content = ""
+                    try:
+                        async for chunk in vision_response:
+                            if chunk.choices and chunk.choices[0].delta.content:
+                                vision_content += chunk.choices[0].delta.content
+                                print(chunk.choices[0].delta.content, end='', flush=True)
+                    except Exception:
+                        pass
+                    
+                    print()
+                    tool_result["vision_analysis"] = vision_content
 
                 messages.append({
                     "role": "tool",
@@ -130,23 +202,23 @@ class LocalAIClient:
                 })
 
             tool_call_count += 1
-
-        # Final call to get structured response
-        final_response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=messages
+        
+        print("\n[Finalizing recommendations...]", end='', flush=True)
+        final_content, _ = await self._stream_chat_completion(
+            messages=messages,
+            print_tokens=True
         )
-
+        
         try:
-            return json.loads(final_response.choices[0].message.content)
+            return json.loads(final_content)
         except json.JSONDecodeError:
             return {
-                "analysis_summary": final_response.choices[0].message.content,
+                "analysis_summary": final_content,
                 "recommendations": [],
                 "reasoning_chain": reasoning_chain
             }
 
-    async def analyze_position(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    async def analyze_position(
         self,
         symbol: str,
         entry_price: float,
@@ -157,6 +229,8 @@ class LocalAIClient:
         volume_data: Dict[str, float]
     ) -> Dict[str, Any]:
         """Analyze a position using local AI."""
+        print(f"[Checking position: {symbol}]", end='', flush=True)
+        
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
 
         prompt = LOCAL_POSITION_CHECK_PROMPT.format(
@@ -174,27 +248,27 @@ class LocalAIClient:
             avg_volume=volume_data.get("average", 0)
         )
 
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
+        full_content, _ = await self._call_with_retry(
+            lambda: self._stream_chat_completion(
                 messages=[
                     {
                         "role": "system",
-                        "content": SYSTEM_PROMPT,
+                        "content": SYSTEM_PROMPT
                     },
                     {
                         "role": "user",
-                        "content": prompt,
+                        "content": prompt
                     },
-                ]
+                ],
+                print_tokens=True
             )
-
-            content = response.choices[0].message.content
-            return json.loads(content)
-
-        except Exception as e:  # pylint: disable=broad-except
+        )
+        
+        try:
+            return json.loads(full_content)
+        except Exception:
             return {
-                "decision": "ESCALATE",
-                "reasoning": f"Local AI error: {str(e)}",
+                "decision": "HOLD",
+                "reasoning": f"Error parsing response: {full_content[:100]}",
                 "confidence": 0.0
             }

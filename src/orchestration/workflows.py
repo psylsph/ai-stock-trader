@@ -52,7 +52,7 @@ class TradingWorkflow:
         # Initialize AI Clients
         self.local_ai = LocalAIClient(
             api_url=settings.LM_STUDIO_API_URL,
-            model=settings.LM_STUDIO_MODEL
+            model=settings.LM_STUDIO_MODEL.strip()  # Remove any whitespace
         )
         self.openrouter_client = OpenRouterClient(
             settings.OPENROUTER_API_KEY, 
@@ -113,28 +113,33 @@ class TradingWorkflow:
 
         # 4. Local AI Analysis with Tools
         print("\nRunning Local AI Analysis with Tools...")
-        try:
-            analysis = await asyncio.wait_for(
-                self.decision_engine.startup_analysis(
+        max_retries = self.settings.AI_MAX_RETRIES
+        retry_delay = self.settings.AI_RETRY_DELAY_SECONDS
+        analysis = {
+            "analysis_summary": "Analysis not completed",
+            "recommendations": []
+        }
+        
+        for attempt in range(max_retries):
+            try:
+                analysis = await self.decision_engine.startup_analysis(
                     portfolio_summary=portfolio_summary,
                     market_status=str(market_status),
                     rss_news_summary=news_summary,
                     tools=self.tools
-                ),
-                timeout=60.0  # 60 second timeout for AI analysis
-            )
-        except asyncio.TimeoutError:
-            print("AI Analysis timed out. Using fallback recommendations.")
-            analysis = {
-                "analysis_summary": "AI analysis timed out. No recommendations available.",
-                "recommendations": []
-            }
-        except Exception as e:  # pylint: disable=broad-except
-            print(f"Error during AI analysis: {e}")
-            analysis = {
-                "analysis_summary": f"Error during analysis: {str(e)}",
-                "recommendations": []
-            }
+                )
+                break
+            except Exception as e:  # pylint: disable=broad-except
+                if attempt < max_retries - 1:
+                    delay = retry_delay * (attempt + 1)
+                    print(f"  Analysis attempt {attempt + 1}/{max_retries} failed: {e}. Retrying in {delay}s...", end='', flush=True)
+                    await asyncio.sleep(delay)
+                else:
+                    print(f"\nAll {max_retries} attempts failed. Using fallback.")
+                    analysis = {
+                        "analysis_summary": f"Error during analysis: {str(e)}",
+                        "recommendations": []
+                    }
 
         print("\n" + "=" * 50)
         print(f"{'LOCAL AI ANALYSIS RESULT':^50}")
