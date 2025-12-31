@@ -19,7 +19,12 @@ async def main():
     parser = argparse.ArgumentParser(description="AI Stock Trader Bot")
     parser.add_argument("--restart", action="store_true", help="Reset the database before starting")
     parser.add_argument("--web", action="store_true", help="Start web server for monitoring and control")
+    parser.add_argument("--test-mode", action="store_true", help="Ignore market hours for testing buy/sell logic")
     args = parser.parse_args()
+
+    if args.test_mode:
+        settings.IGNORE_MARKET_HOURS = True
+        logger.info("TEST MODE ENABLED: Ignoring market hours")
 
     logger.info("Starting AI Stock Trader Bot...")
     logger.info("[DEBUG] Web server flag: %s", args.web)
@@ -46,7 +51,7 @@ async def main():
         asyncio.create_task(workflow.run_monitoring_loop())
 
         # Create uvicorn config and server to run in the same event loop
-        config = uvicorn.Config(app, host="0.0.0.0", port=8000, loop="asyncio")
+        config = uvicorn.Config(app, host="0.0.0.0", port=8000, loop="asyncio", log_level="warning")
         server = uvicorn.Server(config)
 
         # Run the server and wait for it to finish

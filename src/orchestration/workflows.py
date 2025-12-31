@@ -87,7 +87,18 @@ class TradingWorkflow:
 
         if action == "BUY":
             size_pct = validation.get("new_size_pct", rec.get("size_pct", 0.05))
+            
+            # Calculate target quantity based on total portfolio value
             quantity = int((balance * size_pct) / current_price)
+            
+            # Cap quantity by available cash balance
+            cash_balance = await self.broker.get_account_balance()
+            max_qty_by_cash = int(cash_balance / current_price)
+            if quantity > max_qty_by_cash:
+                print(f"[DEBUG] Capping quantity for {symbol} from {quantity} to {max_qty_by_cash} due to cash limit ({cash_balance:.2f})")
+                quantity = max_qty_by_cash
+
+            print(f"[DEBUG] BUY calculation: balance={balance}, cash={cash_balance}, size_pct={size_pct}, price={current_price}, quantity={quantity}")
 
             if quantity > 0:
                 current_positions = await self.broker.get_positions()
@@ -101,6 +112,7 @@ class TradingWorkflow:
                 if not existing_pos:
                     num_positions += 1
 
+                print(f"[DEBUG] Risk Check: symbol={symbol}, quantity={quantity}, price={current_price}, portfolio_val={balance}, pos_size={current_pos_size}, num_pos={num_positions}")
                 if self.risk_manager.validate_trade(
                     action="BUY",
                     quantity=quantity,
@@ -355,6 +367,9 @@ class TradingWorkflow:
             try:
                 symbol = rec["symbol"]
                 action = rec["action"]
+                
+                # Re-fetch balance to ensure sequential trades respect previous ones
+                balance = await self.broker.get_account_balance()
 
                 # Ignore HOLD or SELL recommendations for stocks we don't own
                 if action in ["HOLD", "SELL"] and symbol not in active_symbols:
@@ -374,7 +389,7 @@ class TradingWorkflow:
                     response=analysis,
                     decision=action,
                     confidence=rec["confidence"],
-                    requires_manual_review=self.settings.TRADING_MODE == "live"
+                    requires_manual_review=self.settings.TRADING_MODE == "live" and not self.settings.IGNORE_MARKET_HOURS
                 )
                 await self.repo.log_decision(local_decision_record)
 
@@ -398,7 +413,7 @@ class TradingWorkflow:
                         symbol=rec["symbol"],
                         remote_validation_decision=validation["decision"],
                         remote_validation_comments=validation.get("comments", ""),
-                        requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED"
+                        requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED" and not self.settings.IGNORE_MARKET_HOURS
                     )
 
                     if validation["decision"] in ["PROCEED", "MODIFY"]:
@@ -412,8 +427,18 @@ class TradingWorkflow:
                             print(f"Validation rejection for {rec['symbol']}: Confidence {target_rec['confidence']} < 0.8")
                             continue
 
-                        if market_status.is_open:
-                            success = await self._execute_trade(target_rec, validation, balance)
+                        if market_status.is_open or self.settings.IGNORE_MARKET_HOURS:
+                            # Re-fetch balance and positions for latest portfolio state
+                            current_balance = await self.broker.get_account_balance()
+                            current_positions = await self.broker.get_positions()
+                            
+                            # Calculate total portfolio value for risk management
+                            total_value = current_balance
+                            for p in current_positions:
+                                p_quote = await self.market_data.get_quote(p["symbol"])
+                                total_value += p["quantity"] * p_quote.price
+
+                            success = await self._execute_trade(target_rec, validation, total_value)
                             if success:
                                 await self.repo.mark_decision_executed(rec["symbol"])
                         else:
@@ -468,10 +493,19 @@ class TradingWorkflow:
             return
 
         print(f"Found {len(pending)} pending trades to execute...")
-        balance = await self.broker.get_account_balance()
-
+        
         for decision in pending:
             try:
+                # Re-fetch balance and positions for latest portfolio state
+                current_balance = await self.broker.get_account_balance()
+                current_positions = await self.broker.get_positions()
+                
+                # Calculate total portfolio value for risk management
+                total_value = current_balance
+                for p in current_positions:
+                    p_quote = await self.market_data.get_quote(p["symbol"])
+                    total_value += p["quantity"] * p_quote.price
+
                 # Reconstruct rec and validation from decision context
                 rec = decision.context.get("rec") if decision.context else None
                 if not rec:
@@ -487,11 +521,9 @@ class TradingWorkflow:
                     # In MODIFY cases, target_rec should have the modified values.
                     pass
 
-                success = await self._execute_trade(rec, validation, balance)
+                success = await self._execute_trade(rec, validation, total_value)
                 if success:
                     await self.repo.mark_decision_executed(decision.symbol)
-                    # Update balance for next iteration
-                    balance = await self.broker.get_account_balance()
 
             except Exception as e:
                 print(f"Error executing pending trade for {decision.symbol}: {e}")
@@ -511,13 +543,21 @@ class TradingWorkflow:
                 # 1. Fetch deep context
                 quote = await self.market_data.get_quote(position.stock.symbol)
                 history = await self.market_data.get_historical(position.stock.symbol, period="1mo")
+                prices = [h.close for h in history]
                 history_str = "\n".join([f"{h.timestamp}: C={h.close} V={h.volume}" for h in history[-20:]])
                 
                 # Indicators for AI
+                rsi = self.prescreener.calculate_rsi(prices)
+                macd, signal = self.prescreener.calculate_macd(prices)
+                sma_20 = self.prescreener.calculate_sma(prices, 20)
+                sma_50 = self.prescreener.calculate_sma(prices, 50)
+                
                 indicators = {
-                    "rsi": 50, # Simple fallback if not calc
-                    "macd": 0,
-                    "sma_20": sum(h.close for h in history[-20:]) / 20
+                    "rsi": rsi,
+                    "macd": macd,
+                    "signal": signal,
+                    "sma_20": sma_20,
+                    "sma_50": sma_50
                 }
                 
                 # 2. Local AI Intraday Check
@@ -573,7 +613,7 @@ class TradingWorkflow:
             try:
                 # 1. Check for pending executions (e.g. from closed market)
                 market_status = await self.market_data.get_market_status()
-                if market_status.is_open:
+                if market_status.is_open or self.settings.IGNORE_MARKET_HOURS:
                     await self._execute_pending_trades()
 
                 # 2. Check if it's time for hourly full portfolio revaluation
@@ -594,16 +634,25 @@ class TradingWorkflow:
                         history = await self.market_data.get_historical(
                             position.stock.symbol, period="1mo"
                         )
+                        prices = [h.close for h in history]
 
+                        # Calculate real indicators using prescreener logic
+                        rsi = self.prescreener.calculate_rsi(prices)
+                        macd, signal = self.prescreener.calculate_macd(prices)
+                        sma_20 = self.prescreener.calculate_sma(prices, 20)
+                        sma_50 = self.prescreener.calculate_sma(prices, 50)
+                        
                         history_str = "\n".join([
                             f"{h.timestamp}: C={h.close} V={h.volume}"
                             for h in history[-20:]
                         ])
 
                         indicators = {
-                            "rsi": 50,
-                            "macd": 0,
-                            "sma_20": sum(h.close for h in history[-20:]) / 20
+                            "rsi": rsi,
+                            "macd": macd,
+                            "signal": signal,
+                            "sma_20": sma_20,
+                            "sma_50": sma_50
                         }
 
                         volume_data = {
@@ -634,7 +683,7 @@ class TradingWorkflow:
                             response=decision,
                             decision=final_action,
                             confidence=decision["confidence"],
-                            requires_manual_review=self.settings.TRADING_MODE == "live" and final_action == "SELL"
+                            requires_manual_review=self.settings.TRADING_MODE == "live" and final_action == "SELL" and not self.settings.IGNORE_MARKET_HOURS
                         )
                         await self.repo.log_decision(monitoring_decision)
 
@@ -646,7 +695,7 @@ class TradingWorkflow:
                                 decision["confidence"] >= 0.8):
                             # Check market status before selling
                             market_status = await self.market_data.get_market_status()
-                            if not market_status.is_open:
+                            if not (market_status.is_open or self.settings.IGNORE_MARKET_HOURS):
                                 print(f"Market CLOSED: Delaying SELL for {position.stock.symbol}")
                                 continue
 
@@ -666,7 +715,7 @@ class TradingWorkflow:
                                 symbol=position.stock.symbol,
                                 remote_validation_decision=validation["decision"],
                                 remote_validation_comments=validation.get("comments", ""),
-                                requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED"
+                                requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED" and not self.settings.IGNORE_MARKET_HOURS
                             )
 
                             if validation["decision"] in ["PROCEED", "MODIFY"]:
@@ -682,7 +731,18 @@ class TradingWorkflow:
                                     "confidence": final_confidence,
                                     "reasoning": decision["reasoning"]
                                 }
-                                success = await self._execute_trade(sell_rec, validation, balance=0.0)
+                                
+                                # Re-fetch balance and positions for latest portfolio state
+                                current_balance = await self.broker.get_account_balance()
+                                current_positions = await self.broker.get_positions()
+                                
+                                # Calculate total portfolio value for risk management
+                                total_value = current_balance
+                                for p in current_positions:
+                                    p_quote = await self.market_data.get_quote(p["symbol"])
+                                    total_value += p["quantity"] * p_quote.price
+
+                                success = await self._execute_trade(sell_rec, validation, balance=total_value)
                                 if success:
                                     await self.repo.mark_decision_executed(position.stock.symbol)
                             else:

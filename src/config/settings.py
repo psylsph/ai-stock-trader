@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Trading Configuration
     TRADING_MODE: str = "paper"  # "paper" or "live"
+    IGNORE_MARKET_HOURS: bool = False
     CHECK_INTERVAL_SECONDS: int = 300
     INITIAL_BALANCE: float = 10000.0
     MAX_POSITIONS: int = 5  # Maximum number of open positions

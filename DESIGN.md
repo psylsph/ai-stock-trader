@@ -204,6 +204,7 @@ erDiagram
 ### 6.2 Market Hours (LSE)
 - **Hours**: 08:00 to 16:30 GMT, Monday to Friday.
 - **Handling**: The bot checks `get_market_status()`. If the market is closed, it continues to analyze and "plan" positions (stored as `PENDING`), but will not attempt to execute trades until the next market open.
+- **Test Mode (Market Hour Override)**: Using the `--test-mode` command-line flag enables `IGNORE_MARKET_HOURS`. This forces `get_market_status()` to always return `is_open=True`, allowing developers to test the full buy/sell/hold execution logic even when the LSE is closed.
 
 ### 6.3 Position Sizing Formula
 The bot uses a risk-controlled sizing model:

@@ -89,6 +89,7 @@ Volume Analysis:
 - Average Volume: {avg_volume}
 
 Task: Recommend HOLD, SELL, or ESCALATE (if uncertain or significant negative news is suspected).
+CRITICAL: If you detect a large sudden price drop, a breakdown below major support (SMA 50), or RSI dropping sharply from overbought, suggest a SELL to avoid further losses.
 Provide reasoning and confidence score (0.0-1.0).
 
 Return your response in strict JSON format:

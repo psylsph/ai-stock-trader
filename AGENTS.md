@@ -29,7 +29,7 @@ python -m pytest tests/ -v
 # Run all tests
 pytest
 
-# Run single test
+# Run single test function
 pytest tests/test_database.py::test_create_stock
 
 # Run specific test file
@@ -49,6 +49,9 @@ python -m src.main --restart
 
 # Start with web dashboard
 python -m src.main --web
+
+# Start in test mode (ignore market hours)
+python -m src.main --test-mode
 ```
 
 ## Code Style Guidelines
@@ -60,7 +63,7 @@ python -m src.main --web
 
 ### Type Hints & Naming
 - Required for all function signatures
-- Use `Optional[T]` instead of `T | None`
+- Use `Optional[T]` from `typing` or `T | None` (be consistent within file)
 - Use `Dict[str, Any]`, `List[T]` for collections
 - Classes: `PascalCase`, Functions/Variables: `snake_case`, Constants: `UPPER_SNAKE_CASE`
 
@@ -77,12 +80,13 @@ async def analyze_position(
 - All database operations and external API calls must be async
 - Use `async with` for context managers (sessions, HTTP clients)
 - Use `asyncio.gather()` for parallel independent tasks
+- Always `await` database commits and refreshes
 
 ### Error Handling
 - Use specific exceptions where possible
 - For broad exceptions, use `# pylint: disable=broad-except`
 - Log errors with `exc_info=True`
-- Provide fallback responses for AI failures
+- Provide fallback responses for AI failures to ensure system stability
 
 ```python
 try:
@@ -94,8 +98,8 @@ except Exception as e:  # pylint: disable=broad-except
 
 ### Database (SQLAlchemy 2.0+)
 - Use `Mapped[T]` and `mapped_column()`
-- Use async session maker pattern
-- Always use `select()` with `execute()`
+- Use async session maker pattern (`async_sessionmaker`)
+- Always use `select()` with `execute()` instead of legacy query patterns
 
 ```python
 class Stock(Base):
@@ -105,19 +109,24 @@ class Stock(Base):
 ```
 
 ### Pydantic & Configuration
-- Use `pydantic-settings.BaseSettings`
+- Use `pydantic-settings.BaseSettings` for config
 - Define `model_config = SettingsConfigDict(env_file=".env", extra="ignore")`
 
 ### Documentation & Comments
 - Docstrings with `"""triple quotes"""` for all public members
 - Describe params and return values
 - Keep comments minimal; use `# TODO:` for future work
-- Comment complex business logic only
+- Comment complex business logic or AI prompt engineering only
 
 ### Testing
 - Use `@pytest.mark.asyncio` and `@pytest_asyncio.fixture`
 - Mock external dependencies (AI APIs, Market Data)
 - Use in-memory SQLite for database tests: `sqlite+aiosqlite:///:memory:`
+
+### AI Implementation
+- Always clean AI JSON responses to handle "thinking" blocks or extra text
+- Use `SYSTEM_PROMPT` from `src.ai.prompts` as the base for AI requests
+- Ensure all AI tools/functions are properly documented for the LLM
 
 ### Project Structure
 - `src/ai/`: AI clients (Local, OpenRouter) and decision engine

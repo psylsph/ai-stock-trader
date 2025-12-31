@@ -22,6 +22,7 @@ except ImportError:
     yf = None
 
 import pytz
+from src.config.settings import settings
 
 
 class Quote(BaseModel):
@@ -99,16 +100,21 @@ class YahooFinanceFetcher(MarketDataFetcher):
         formatted_symbol = self._format_symbol(symbol)
         ticker = yf.Ticker(formatted_symbol)
         info = ticker.fast_info
+        
+        # LSE stocks are usually quoted in pence (GBp). Convert to GBP.
+        price = info.last_price if info.last_price is not None else 0.0
+        prev_close = info.previous_close if info.previous_close is not None else 0.0
+        
+        if formatted_symbol.endswith(".L"):
+            price = price / 100.0
+            prev_close = prev_close / 100.0
 
         return Quote(
             symbol=symbol,
-            price=info.last_price,
-            change=info.last_price - info.previous_close,
-            change_percent=(
-                (info.last_price - info.previous_close) /
-                info.previous_close
-            ) * 100,
-            volume=info.last_volume,
+            price=price,
+            change=price - prev_close,
+            change_percent=((price - prev_close) / prev_close) * 100 if prev_close else 0.0,
+            volume=info.last_volume if info.last_volume is not None else 0,
             timestamp=datetime.now(self.tz)
         )
 
@@ -129,13 +135,21 @@ class YahooFinanceFetcher(MarketDataFetcher):
         history = ticker.history(period=period)
 
         results = []
+        is_lse = formatted_symbol.endswith(".L")
         for index, row in history.iterrows():
+            p_open, p_high, p_low, p_close = row["Open"], row["High"], row["Low"], row["Close"]
+            if is_lse:
+                p_open /= 100.0
+                p_high /= 100.0
+                p_low /= 100.0
+                p_close /= 100.0
+                
             results.append(OHLCV(
                 timestamp=index.to_pydatetime(),
-                open=row["Open"],
-                high=row["High"],
-                low=row["Low"],
-                close=row["Close"],
+                open=p_open,
+                high=p_high,
+                low=p_low,
+                close=p_close,
                 volume=row["Volume"]
             ))
         return results
@@ -146,6 +160,9 @@ class YahooFinanceFetcher(MarketDataFetcher):
         Returns:
             MarketStatus object with current market state.
         """
+        if settings.IGNORE_MARKET_HOURS:
+            return MarketStatus(is_open=True, next_open=None, next_close=None)
+
         now = datetime.now(self.tz)
         if now.weekday() >= 5:
             return MarketStatus(is_open=False, next_open=None, next_close=None)
@@ -246,10 +263,18 @@ class AlphaVantageFetcher(MarketDataFetcher):
         if not q:
             raise ValueError(f"No quote data found for {symbol}: {data}")
 
+        price = float(q.get("05. price", 0))
+        change = float(q.get("09. change", 0))
+        
+        # Alpha Vantage LSE symbols usually in pence
+        if symbol.endswith(".L") or symbol.endswith(".LON"):
+            price /= 100.0
+            change /= 100.0
+
         return Quote(
             symbol=q.get("01. symbol", symbol),
-            price=float(q.get("05. price", 0)),
-            change=float(q.get("09. change", 0)),
+            price=price,
+            change=change,
             change_percent=float(
                 q.get("10. change percent", "0").replace("%", "")
             ),
@@ -292,14 +317,26 @@ class AlphaVantageFetcher(MarketDataFetcher):
 
         ts = data.get("Time Series (Daily)", {})
         results = []
+        is_lse = symbol.endswith(".L") or symbol.endswith(".LON")
         for date_str, values in ts.items():
             dt = datetime.strptime(date_str, "%Y-%m-%d")
+            p_open = float(values["1. open"])
+            p_high = float(values["2. high"])
+            p_low = float(values["3. low"])
+            p_close = float(values["4. close"])
+            
+            if is_lse:
+                p_open /= 100.0
+                p_high /= 100.0
+                p_low /= 100.0
+                p_close /= 100.0
+                
             results.append(OHLCV(
                 timestamp=dt,
-                open=float(values["1. open"]),
-                high=float(values["2. high"]),
-                low=float(values["3. low"]),
-                close=float(values["4. close"]),
+                open=p_open,
+                high=p_high,
+                low=p_low,
+                close=p_close,
                 volume=int(values["5. volume"])
             ))
 
@@ -313,6 +350,9 @@ class AlphaVantageFetcher(MarketDataFetcher):
         Returns:
             MarketStatus object with current market state.
         """
+        if settings.IGNORE_MARKET_HOURS:
+            return MarketStatus(is_open=True, next_open=None, next_close=None)
+
         # Re-use same local time logic as Yahoo for now as AV doesn't have
         # a status endpoint
         now = datetime.now(self.tz)
