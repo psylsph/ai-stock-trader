@@ -1,5 +1,27 @@
 # AGENTS.md - Guidelines for Agentic Coding
 
+## IMPORTANT: Mandatory Code Quality Checks
+
+**YOU MUST ALWAYS RUN LINTER AND ALL TESTS AFTER YOU DO ANY UPDATES**
+
+Before completing any work, you MUST:
+1. Run pylint on all source and test files
+2. Run mypy for type checking
+3. Run ALL tests (not just a subset)
+4. Fix any failures before reporting completion
+5. Update the DESIGN.md to match any design changes, the user MUST be asked if the design is to be updated.
+
+```bash
+# Run linter
+.venv/bin/pylint src/ tests/ --max-line-length=120 --disable=C0114,C0115,C0116
+
+# Run type checker
+mypy src/ tests/
+
+# Run ALL tests
+python -m pytest tests/ -v
+```
+
 ## Build/Lint/Test Commands
 
 ### Running Tests

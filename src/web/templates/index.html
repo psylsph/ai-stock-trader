@@ -14,7 +14,10 @@
     <nav class="bg-gray-800 border-b border-gray-700 p-4">
         <div class="container mx-auto flex justify-between items-center">
             <h1 class="text-xl font-bold text-blue-400">AI Stock Trader</h1>
-            <div class="text-sm text-gray-400">Live Dashboard</div>
+            <div class="text-sm text-gray-400">
+                <span>Mode:</span>
+                <span id="trading-mode" class="ml-2 font-semibold text-white"></span>
+            </div>
         </div>
     </nav>
 
@@ -23,118 +26,20 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm mb-1">Total Portfolio Value</div>
-                <div class="text-3xl font-bold text-white">£{{ "{:,.2f}".format(total_value) }}</div>
+                <div class="text-3xl font-bold text-white">£<span id="total-value">{{ "{:,.2f}".format(total_value) }}</span></div>
             </div>
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm mb-1">Cash Balance</div>
-                <div class="text-3xl font-bold text-green-400">£{{ "{:,.2f}".format(balance) }}</div>
+                <div class="text-3xl font-bold text-green-400">£<span id="cash-balance">{{ "{:,.2f}".format(balance) }}</span></div>
             </div>
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm mb-1">Market Value</div>
-                <div class="text-3xl font-bold text-blue-400">£{{ "{:,.2f}".format(total_market_value) }}</div>
+                <div class="text-3xl font-bold text-blue-400">£<span id="market-value">{{ "{:,.2f}".format(total_market_value) }}</span></div>
             </div>
         </div>
 
-        <!-- Planned Positions -->
+        <!-- Active Positions -->
         <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-8">
-            <div class="p-6 border-b border-gray-700 flex justify-between items-center">
-                <h2 class="text-lg font-semibold text-yellow-400">Planned Positions (Pending Market Open)</h2>
-                <span class="px-3 py-1 bg-yellow-400/10 text-yellow-400 text-xs font-bold rounded-full uppercase">Pending</span>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left">
-                    <thead>
-                        <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
-                            <th class="px-6 py-4 font-semibold">Symbol</th>
-                            <th class="px-6 py-4 font-semibold text-right">Action</th>
-                            <th class="px-6 py-4 font-semibold text-right">Confidence</th>
-                            <th class="px-6 py-4 font-semibold text-right">Est. Size %</th>
-                            <th class="px-6 py-4 font-semibold">Reasoning</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-700">
-                        {% for d in pending_decisions %}
-                        <tr class="hover:bg-gray-700/50 transition-colors">
-                            <td class="px-6 py-4 font-bold text-blue-400">{{ d.symbol }}</td>
-                            <td class="px-6 py-4 text-right">
-                                <span class="px-2 py-1 bg-green-400/10 text-green-400 text-xs font-bold rounded uppercase">{{ d.decision }}</span>
-                            </td>
-                            <td class="px-6 py-4 text-right">{{ "{:.0f}%".format(d.confidence * 100) }}</td>
-                            <td class="px-6 py-4 text-right">{{ "{:.1f}%".format(d.context.rec.size_pct * 100) if d.context.rec.size_pct else "N/A" }}</td>
-                            <td class="px-6 py-4 text-sm text-gray-400 max-w-xs truncate" title="{{ d.context.rec.reasoning }}">
-                                {{ d.context.rec.reasoning }}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                        {% if not pending_decisions %}
-                        <tr>
-                            <td colspan="5" class="px-6 py-8 text-center text-gray-500">No planned positions for next market open.</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- All AI Decisions -->
-        <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-8">
-            <div class="p-6 border-b border-gray-700">
-                <h2 class="text-lg font-semibold">All AI Recommendations</h2>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-left">
-                    <thead>
-                        <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
-                            <th class="px-6 py-4 font-semibold">Time</th>
-                            <th class="px-6 py-4 font-semibold">Symbol</th>
-                            <th class="px-6 py-4 font-semibold">AI Type</th>
-                            <th class="px-6 py-4 font-semibold text-right">Action</th>
-                            <th class="px-6 py-4 font-semibold text-right">Confidence</th>
-                            <th class="px-6 py-4 font-semibold">Status</th>
-                            <th class="px-6 py-4 font-semibold">Reasoning</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-700">
-                        {% for d in all_decisions %}
-                        <tr class="hover:bg-gray-700/50 transition-colors">
-                            <td class="px-6 py-4 text-sm text-gray-400">{{ d.timestamp.strftime('%H:%M') }}</td>
-                            <td class="px-6 py-4 font-bold text-blue-400">{{ d.symbol }}</td>
-                            <td class="px-6 py-4 text-sm">{{ d.ai_type }}</td>
-                            <td class="px-6 py-4 text-right">
-                                <span class="px-2 py-1 text-xs font-bold rounded uppercase
-                                    {% if d.decision == 'BUY' %}bg-green-400/10 text-green-400
-                                    {% elif d.decision == 'SELL' %}bg-red-400/10 text-red-400
-                                    {% else %}bg-gray-400/10 text-gray-400{% endif %}">
-                                    {{ d.decision }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 text-right">{{ "{:.0f}%".format(d.confidence * 100) }}</td>
-                            <td class="px-6 py-4">
-                                <span class="px-2 py-1 text-xs font-bold rounded uppercase
-                                    {% if d.status == 'PENDING' %}bg-yellow-400/10 text-yellow-400
-                                    {% elif d.status == 'EXECUTED' %}bg-green-400/10 text-green-400
-                                    {% elif d.status == 'IGNORED' %}bg-gray-400/10 text-gray-400
-                                    {% else %}bg-red-400/10 text-red-400{% endif %}">
-                                    {{ d.status }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-4 text-sm text-gray-400 max-w-xs truncate" title="{{ d.context.rec.reasoning }}">
-                                {{ d.context.rec.reasoning }}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                        {% if not all_decisions %}
-                        <tr>
-                            <td colspan="7" class="px-6 py-8 text-center text-gray-500">No AI decisions recorded yet.</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Positions Table -->
-        <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
             <div class="p-6 border-b border-gray-700">
                 <h2 class="text-lg font-semibold">Active Positions</h2>
             </div>
@@ -143,40 +48,254 @@
                     <thead>
                         <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
                             <th class="px-6 py-4 font-semibold">Symbol</th>
-                            <th class="px-6 py-4 font-semibold text-right">Quantity</th>
-                            <th class="px-6 py-4 font-semibold text-right">Avg Entry</th>
-                            <th class="px-6 py-4 font-semibold text-right">Current Price</th>
-                            <th class="px-6 py-4 font-semibold text-right">Market Value</th>
-                            <th class="px-6 py-4 font-semibold text-right">P&L %</th>
+                            <th class="px-6 py-4 font-semibold">Quantity</th>
+                            <th class="px-6 py-4 font-semibold">Entry Price</th>
+                            <th class="px-6 py-4 font-semibold">Current Price</th>
+                            <th class="px-6 py-4 font-semibold">P&L</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700">
+                        {% if positions %}
                         {% for p in positions %}
-                        {% set pnl = ((p.current_price - p.entry_price) / p.entry_price * 100) if p.entry_price else 0 %}
                         <tr class="hover:bg-gray-700/50 transition-colors">
                             <td class="px-6 py-4 font-bold text-blue-400">{{ p.stock.symbol }}</td>
-                            <td class="px-6 py-4 text-right">{{ "{:,.2f}".format(p.quantity) }}</td>
+                            <td class="px-6 py-4 text-right">{{ p.quantity }}</td>
                             <td class="px-6 py-4 text-right">£{{ "{:,.2f}".format(p.entry_price) }}</td>
                             <td class="px-6 py-4 text-right">£{{ "{:,.2f}".format(p.current_price) }}</td>
-                            <td class="px-6 py-4 text-right">£{{ "{:,.2f}".format(p.quantity * p.current_price) }}</td>
-                            <td class="px-6 py-4 text-right font-semibold {{ 'text-green-400' if pnl >= 0 else 'text-red-400' }}">
-                                {{ "{:+.2f}%".format(pnl) }}
-                            </td>
+                            <td class="px-6 py-4 text-right {% if p.pnl_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "{:+.1f}%".format(p.pnl_pct) }}</td>
                         </tr>
                         {% endfor %}
-                        {% if not positions %}
+                        {% else %}
                         <tr>
-                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">No active positions found.</td>
+                            <td colspan="5" class="px-6 py-8 text-center text-gray-500">No active positions</td>
                         </tr>
                         {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
-        
-        <div class="mt-8 text-center text-gray-500 text-sm">
-            Refreshes automatically when you reload the page. For live updates, use the API at <code>/api/status</code>.
+
+        <!-- Latest AI Decisions with Validation -->
+        <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-8">
+            <div class="p-6 border-b border-gray-700">
+                <h2 class="text-lg font-semibold">Latest AI Decisions</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
+                            <th class="px-6 py-4 font-semibold">Time</th>
+                            <th class="px-6 py-4 font-semibold">Symbol</th>
+                            <th class="px-6 py-4 font-semibold">Action</th>
+                            <th class="px-6 py-4 font-semibold">Confidence</th>
+                            <th class="px-6 py-4 font-semibold">Status</th>
+                            <th class="px-6 py-4 font-semibold">Validation</th>
+                            <th class="px-6 py-4 font-semibold">Reasoning</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">
+                        {% if latest_decisions %}
+                        {% for symbol, decision in latest_decisions.items() %}
+                        <tr class="hover:bg-gray-700/50 transition-colors">
+                            <td class="px-6 py-4 text-sm text-gray-400">{{ decision.timestamp.strftime('%H:%M') }}</td>
+                            <td class="px-6 py-4 font-bold text-blue-400">{{ decision.symbol }}</td>
+                            <td class="px-6 py-4 text-right">
+                                <span class="px-2 py-1 bg-blue-400/10 text-blue-400 text-xs font-bold rounded uppercase">{{ decision.decision }}</span>
+                            </td>
+                            <td class="px-6 py-4 text-right">{{ "{:.0f}%".format(decision.confidence * 100) }}</td>
+                            <td class="px-6 py-4 text-right">
+                                <span id="status-{{ symbol }}" class="px-2 py-1 text-xs font-bold rounded"></span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <span id="validation-{{ symbol }}" class="px-2 py-1 text-xs font-bold rounded"></span>
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-400 max-w-xs truncate" title="{{ decision.context.rec.reasoning }}">
+                                {{ decision.context.rec.reasoning }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="px-6 py-8 text-center text-gray-500">No decisions recorded yet</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </main>
+
+        <!-- Pending Trade Controls -->
+        <div id="pending-trades-section" class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden mb-8" style="display: none;">
+            <div class="p-6 border-b border-gray-700">
+                <h2 class="text-lg font-semibold">Pending Trades</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
+                            <th class="px-6 py-4 font-semibold">Symbol</th>
+                            <th class="px-6 py-4 font-semibold">Action</th>
+                            <th class="px-6 py-4 font-semibold">Confidence</th>
+                            <th class="px-6 py-4 font-semibold">Time Remaining</th>
+                            <th class="px-6 py-4 font-semibold">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="pending-trades-body">
+                        <!-- Pending trades will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    <script>
+        let currentData = null;
+
+        async function fetchData() {
+            const response = await fetch('/api/status');
+            currentData = await response.json();
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            if (!currentData) return;
+
+            document.getElementById('total-value').textContent = currentData.total_value.toFixed(2);
+            document.getElementById('cash-balance').textContent = currentData.balance.toFixed(2);
+            document.getElementById('market-value').textContent = currentData.total_market_value.toFixed(2);
+            document.getElementById('trading-mode').textContent = currentData.trading_mode === 'paper' ? 'Paper Trading' : 'Live Trading';
+
+            updateLatestDecisions(currentData.latest_decisions);
+            updatePendingTrades(currentData.pending_decisions);
+        }
+
+        function updateLatestDecisions(decisions) {
+            for (const [symbol, decision] of Object.entries(decisions)) {
+                const statusCell = document.getElementById(`status-${symbol}`);
+                const validationCell = document.getElementById(`validation-${symbol}`);
+
+                if (!statusCell || !validationCell) continue;
+
+                const badge = getValidationBadge(decision);
+                statusCell.textContent = badge.status;
+                validationCell.textContent = badge.validation;
+
+                if (badge.status === '⏳') {
+                    statusCell.className = 'px-2 py-1 bg-yellow-400/10 text-yellow-400 text-xs font-bold rounded uppercase';
+                }
+            }
+        }
+
+        function getValidationBadge(decision) {
+            if (decision.executed) {
+                return { status: '✓', validation: 'Executed' };
+            }
+
+            if (decision.remote_validation_decision) {
+                if (decision.remote_validation_decision === 'PROCEED') {
+                    return { status: '✓', validation: 'Validated' };
+                } else if (decision.remote_validation_decision === 'MODIFY') {
+                    return { status: '⚠', validation: `Modified: ${decision.remote_validation_comments}` };
+                } else if (decision.remote_validation_decision === 'REJECT') {
+                    return { status: '✗', validation: `Rejected: ${decision.remote_validation_comments}` };
+                } else if (decision.remote_validation_decision === 'TIMEOUT') {
+                    return { status: '⏰', validation: 'Auto-rejected: 1h timeout' };
+                } else if (decision.remote_validation_decision === 'MANUAL_APPROVE') {
+                    return { status: '✓', validation: 'Manually approved' };
+                } else if (decision.remote_validation_decision === 'MANUAL_REJECT') {
+                    return { status: '✗', validation: 'Manually rejected' };
+                }
+            }
+
+            if (decision.requires_manual_review && !decision.executed) {
+                const timeRemaining = getTimeRemaining(decision);
+                const countdown = document.getElementById(`countdown-${decision.symbol}`);
+
+                if (countdown) {
+                    countdown.textContent = `⏱ ${timeRemaining}`;
+                    if (timeRemaining === 'TIMEOUT') {
+                        countdown.classList.add('text-red');
+                    }
+                }
+            }
+
+            return { status: '⏳', validation: 'Waiting for validation' };
+        }
+
+        function getTimeRemaining(decision) {
+            if (!decision.validation_timestamp) return 'N/A';
+
+            const now = new Date();
+            const validationTime = new Date(decision.validation_timestamp);
+            const diff = new Date(decision.manual_review_timeout || (validationTime.getTime() + (60 * 60 * 1000))) - now;
+
+            if (diff <= 0) return 'TIMEOUT';
+
+            const minutes = Math.floor(diff / (60 * 1000));
+            const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+            if (minutes > 60) return '> 1 hour';
+            if (minutes > 0) {
+                return `${minutes}m ${seconds}s`;
+            }
+            return `${seconds}s`;
+        }
+
+        function updatePendingTrades(decisions) {
+            const tbody = document.getElementById('pending-trades-body');
+            const section = document.getElementById('pending-trades-section');
+            tbody.innerHTML = '';
+
+            if (decisions.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            section.style.display = 'block';
+
+            for (const decision of decisions) {
+                const timeRemaining = getTimeRemaining(decision);
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 font-bold text-blue-400">${decision.symbol}</td>
+                    <td class="px-6 py-4 text-right">
+                        <span class="px-2 py-1 bg-blue-400/10 text-blue-400 text-xs font-bold rounded uppercase">${decision.decision}</span>
+                    </td>
+                    <td class="px-6 py-4 text-right">${(decision.confidence * 100).toFixed(0)}%</td>
+                    <td class="px-6 py-4 text-right text-center">
+                        <span class="countdown font-mono" id="countdown-${decision.symbol}">${timeRemaining}</span>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <button onclick="approveTrade('${decision.symbol}')" class="px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded font-semibold">
+                            ✓ Approve
+                        </button>
+                        <button onclick="rejectTrade('${decision.symbol}')" class="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded font-semibold">
+                            ✗ Reject
+                        </button>
+                    </td>
+                </tr>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        async function approveTrade(symbol) {
+            if (!confirm(`Approve trade for ${symbol}?`)) return;
+            await fetch(`/api/trades/${symbol}/approve`, { method: 'POST' });
+            await fetchData();
+        }
+
+        async function rejectTrade(symbol) {
+            const reason = prompt('Rejection reason:');
+            if (reason === null) return;
+            await fetch(`/api/trades/${symbol}/reject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason })
+            });
+            await fetchData();
+        }
+
+        fetchData();
+    </script>
 </body>
 </html>

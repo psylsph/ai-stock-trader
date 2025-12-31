@@ -46,7 +46,6 @@ An advanced AI-powered stock trading bot designed for the **London Stock Exchang
 
    ```bash
    OPENROUTER_API_KEY=your_key_here
-   MARKET_DATA_API_KEY=your_alphavantage_key_here
    ```
 
 ## Usage

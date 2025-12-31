@@ -3,10 +3,7 @@
 import json
 from typing import Dict, Any
 
-try:
-    from openai import AsyncOpenAI  # pylint: disable=import-error
-except ImportError:
-    AsyncOpenAI = None
+from openai import AsyncOpenAI
 
 from .prompts import REMOTE_MARKET_ANALYSIS_PROMPT, SYSTEM_PROMPT
 
@@ -69,6 +66,8 @@ class OpenRouterClient:
             )
 
             content = completion.choices[0].message.content
+            if content is None:
+                raise ValueError("No content in response")
             return json.loads(content)
 
         except Exception as e:  # pylint: disable=broad-except

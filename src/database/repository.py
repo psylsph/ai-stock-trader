@@ -1,16 +1,11 @@
 """Database repository for managing database operations."""
 
 from typing import List
+from datetime import datetime, timedelta
 
-try:
-    from sqlalchemy import select  # pylint: disable=import-error
-    from sqlalchemy.orm import selectinload  # pylint: disable=import-error
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker  # pylint: disable=import-error
-except ImportError:
-    select = None
-    selectinload = None
-    create_async_engine = None
-    async_sessionmaker = None
+from sqlalchemy import select, and_, or_
+from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from src.database.models import Base, Stock, Position, Trade, AIDecision
 
@@ -39,13 +34,13 @@ class DatabaseRepository:
             await conn.run_sync(Base.metadata.create_all)
 
     async def get_active_stocks(self) -> List[Stock]:
-        """Get all active stocks from the database.
+        """Get all active stocks from database.
 
         Returns:
             List of active Stock objects.
         """
         async with self.session_maker() as session:
-            result = await session.execute(select(Stock).where(Stock.is_active is True))
+            result = await session.execute(select(Stock).where(Stock.is_active is True))  # type: ignore[arg-type]
             return list(result.scalars().all())
 
     async def get_or_create_stock(self, symbol: str, name: str, type_: str = "stock") -> Stock:
@@ -103,16 +98,6 @@ class DatabaseRepository:
             session.add(decision)
             await session.commit()
 
-    async def get_pending_decisions(self) -> List[AIDecision]:
-        """Get all pending AI decisions from the database.
-
-        Returns:
-            List of AIDecision objects.
-        """
-        async with self.session_maker() as session:
-            result = await session.execute(select(AIDecision))
-            return list(result.scalars().all())
-
     async def get_all_decisions(self) -> List[AIDecision]:
         """Get all AI decisions from the database.
 
@@ -122,3 +107,83 @@ class DatabaseRepository:
         async with self.session_maker() as session:
             result = await session.execute(select(AIDecision))
             return list(result.scalars().all())
+
+    async def update_decision_with_validation(
+        self,
+        symbol: str,
+        remote_validation_decision: str,
+        remote_validation_comments: str,
+        requires_manual_review: bool
+    ):
+        """Update existing AIDecision with remote validation results."""
+        async with self.session_maker() as session:
+            stmt = (
+                select(AIDecision)
+                .where(and_(AIDecision.symbol == symbol, AIDecision.ai_type == "local"))
+                .order_by(AIDecision.timestamp.desc())
+            )
+            result = await session.execute(stmt)
+            decision = result.scalar_one_or_none()
+
+            if decision:
+                decision.remote_validation_decision = remote_validation_decision
+                decision.remote_validation_comments = remote_validation_comments
+                decision.validation_timestamp = datetime.utcnow()
+                decision.requires_manual_review = requires_manual_review
+                await session.commit()
+
+    async def get_pending_decisions(self, timeout_minutes: int = 60) -> List[AIDecision]:
+        """Get decisions awaiting manual review that haven't timed out."""
+        timeout_threshold = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        async with self.session_maker() as session:
+            result = await session.execute(
+                select(AIDecision).where(
+                    and_(
+                        AIDecision.requires_manual_review is True,
+                        AIDecision.executed is False,
+                        or_(
+                            AIDecision.manual_review_timeout.is_(None),
+                            AIDecision.manual_review_timeout > timeout_threshold
+                        )
+                    )
+                )
+            )
+            return list(result.scalars().all())
+
+    async def mark_decision_executed(self, symbol: str):
+        """Mark a decision as executed (for completed trades)."""
+
+        async with self.session_maker() as session:
+            stmt = (
+                select(AIDecision)
+                .where(AIDecision.symbol == symbol)
+                .order_by(AIDecision.timestamp.desc())
+            )
+            result = await session.execute(stmt)
+            decision = result.scalar_one_or_none()
+
+            if decision:
+                decision.executed = True
+                await session.commit()
+
+    async def timeout_pending_decision(self, symbol: str):
+        """Mark a pending decision as timed out (auto-rejected)."""
+
+        async with self.session_maker() as session:
+            stmt = (
+                select(AIDecision)
+                .where(AIDecision.symbol == symbol)
+                .order_by(AIDecision.timestamp.desc())
+            )
+            result = await session.execute(stmt)
+            decision = result.scalar_one_or_none()
+
+            if decision:
+                decision.remote_validation_decision = "TIMEOUT"
+                decision.remote_validation_comments = "Auto-rejected: No manual approval within 1 hour"
+                decision.executed = False
+                await session.commit()
+
+    async def close(self):
+        """Close the database engine and dispose of all connections."""
+        await self.engine.dispose()

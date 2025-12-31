@@ -1,16 +1,10 @@
 """Database models for the AI Stock Trader application."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
-try:
-    from sqlalchemy import String, Float, Integer, Boolean, DateTime, ForeignKey, JSON  # pylint: disable=import-error
-    from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship  # pylint: disable=import-error
-except ImportError:
-    DeclarativeBase = object
-    Mapped = None
-    mapped_column = None
-    relationship = None
+from sqlalchemy import String, Float, Integer, Boolean, DateTime, ForeignKey, JSON
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -93,7 +87,14 @@ class AIDecision(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     ai_type: Mapped[str] = mapped_column(String)  # "local" or "remote"
     symbol: Mapped[str] = mapped_column(String)
-    context: Mapped[dict[str, Any]] = mapped_column(JSON)
+    context: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=True)
     response: Mapped[dict[str, Any]] = mapped_column(JSON)
     decision: Mapped[str] = mapped_column(String)  # "BUY", "SELL", "HOLD"
     confidence: Mapped[float] = mapped_column(Float)
+
+    remote_validation_decision: Mapped[str | None] = mapped_column(String, nullable=True)
+    remote_validation_comments: Mapped[str | None] = mapped_column(String, nullable=True)
+    validation_timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    requires_manual_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    executed: Mapped[bool] = mapped_column(Boolean, default=False)
+    manual_review_timeout: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

@@ -2,12 +2,13 @@
 
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from src.ai.local_ai_client import LocalAIClient
 from src.ai.openrouter_client import OpenRouterClient
 from src.database.models import Position
 from src.ai.tools import TradingTools
+from .prompts import SYSTEM_PROMPT
 
 
 class TradingDecisionEngine:
@@ -54,30 +55,30 @@ class TradingDecisionEngine:
             Validation decision from remote AI.
         """
         validation_prompt = f"""
-You are a senior trader validating a trading decision proposed by an AI system.
+        You are a senior trader validating a trading decision proposed by an AI system.
 
-Proposed Trade:
-- Action: {action}
-- Symbol: {symbol}
-- Confidence: {confidence}
-- Position Size: {size_pct * 100:.1f}% of portfolio
+        Proposed Trade:
+        - Action: {action}
+        - Symbol: {symbol}
+        - Confidence: {confidence}
+        - Position Size: {size_pct * 100:.1f}% of portfolio
 
-Reasoning from Local AI:
-{reasoning}
+        Reasoning from Local AI:
+        {reasoning}
 
-Task: Validate this trade decision. Consider:
-1. Is reasoning sound?
-2. Are there risks that local AI missed?
-3. Should we proceed, modify, or reject?
+        Task: Validate this trade decision. Consider:
+        1. Is reasoning sound?
+        2. Are there risks that local AI missed?
+        3. Should we proceed, modify, or reject?
 
-Return your response in strict JSON format:
-{{
-    "decision": "PROCEED"|"MODIFY"|"REJECT",
-    "new_confidence": 0.85,
-    "new_size_pct": 0.1,
-    "comments": "Your validation comments here"
-}}
-"""
+        Return your response in strict JSON format:
+        {{
+            "decision": "PROCEED"|"MODIFY"|"REJECT",
+            "new_confidence": 0.85,
+            "new_size_pct": 0.1,
+            "comments": "Your validation comments here"
+        }}
+        """
 
         try:
             completion = await self.remote_ai.client.chat.completions.create(
@@ -85,7 +86,7 @@ Return your response in strict JSON format:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a senior UK market trader with deep expertise in LSE stocks."
+                        "content": SYSTEM_PROMPT
                     },
                     {
                         "role": "user",
@@ -96,7 +97,12 @@ Return your response in strict JSON format:
             )
 
             content = completion.choices[0].message.content
-            return json.loads(content)
+            if content is None:
+                raise ValueError("No content in response")
+
+            validation_result = json.loads(content)
+
+            return validation_result
 
         except Exception as e:  # pylint: disable=broad-except
             return {
@@ -139,21 +145,25 @@ Return your response in strict JSON format:
 
         if should_escalate:
             # TODO: Implement specific escalation logic (e.g., confirm sell with remote AI)  # pylint: disable=fixme
-            # For now, we will treat ESCALATE as HOLD but return the flag
+            # For now, we will treat ESCALATE as HOLD but return a flag
             # In a full impl, we would call self.remote_ai.confirm_sell(...)
-            return {
+            result = {
                 "action": "HOLD",  # Default to hold if unsure and can't escalate yet
                 "reasoning": f"Escalated from local AI: {local_decision.get('reasoning')}",
                 "confidence": confidence,
                 "escalated": True
             }
 
-        return {
-                "action": action,
-                "reasoning": local_decision.get("reasoning"),
-                "confidence": confidence,
-                "escalated": False
-            }
+            return result
+
+        result = {
+            "action": action,
+            "reasoning": local_decision.get("reasoning"),
+            "confidence": confidence,
+            "escalated": False
+        }
+
+        return result
 
     async def startup_analysis_with_prescreening(
         self,
@@ -161,11 +171,11 @@ Return your response in strict JSON format:
         market_status: str,
         prescreened_tickers: Dict[str, Dict[str, Any]],
         rss_news_summary: str,
-        tools: 'TradingTools' = None
+        tools: Optional['TradingTools'] = None
     ) -> Dict[str, Any]:
         """
         Run analysis on prescreened stocks with targeted news data.
-        
+
         Args:
             prescreened_tickers: Dict of ticker to indicator results
             rss_news_summary: News data for prescreened stocks only
@@ -218,7 +228,7 @@ Return your response in strict JSON format:
         messages = [
             {
                 "role": "system",
-                "content": "You are Chief UK Market Strategist & Senior Equity Trader with deep expertise in London Stock Exchange (LSE)."
+                "content": SYSTEM_PROMPT
             },
             {
                 "role": "user",

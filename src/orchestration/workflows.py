@@ -5,9 +5,9 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List
 
-from src.config import Settings
+from src.config.settings import Settings
 from src.database.repository import DatabaseRepository
-from src.market.data_fetcher import AlphaVantageFetcher, YahooFinanceFetcher
+from src.market.data_fetcher import YahooFinanceFetcher
 from src.ai.local_ai_client import LocalAIClient
 from src.ai.openrouter_client import OpenRouterClient
 from src.ai.decision_engine import TradingDecisionEngine
@@ -18,6 +18,7 @@ from src.market.yahoo_news_fetcher import YahooNewsFetcher
 from src.market.chart_fetcher import ChartFetcher
 from src.ai.tools import TradingTools
 from src.trading.prescreening import StockPrescreener
+from src.config.web_mode_config import web_mode
 
 
 class TradingWorkflow:
@@ -34,12 +35,11 @@ class TradingWorkflow:
         self.repo = repo
 
         # Initialize Components
-        if not settings.MARKET_DATA_API_KEY or settings.MARKET_DATA_API_KEY == "yahoo":
-            print("Using Yahoo Finance for market data")
-            self.market_data = YahooFinanceFetcher()
-        else:
-            self.market_data = AlphaVantageFetcher(settings.MARKET_DATA_API_KEY)
-        
+        print("Using Yahoo Finance for market data")
+        self.market_data = YahooFinanceFetcher()
+        self.web_mode = web_mode.is_web_mode
+        self.web_mode = False  # Track if web server is running
+
         self.news_fetcher = NewsFetcher(settings.RSS_FEEDS)
         self.yahoo_news_fetcher = YahooNewsFetcher()
         self.chart_fetcher = ChartFetcher()
@@ -61,13 +61,14 @@ class TradingWorkflow:
             settings.OPENROUTER_MODEL
         )
         self.decision_engine = TradingDecisionEngine(
-            self.local_ai, self.openrouter_client
+            self.local_ai,
+            self.openrouter_client
         )
-        
+
         self.broker = PaperTrader(repo, self.market_data, settings.INITIAL_BALANCE)
         self.position_manager = PositionManager(repo)
         self.risk_manager = RiskManager()
-        
+
         self.prescreener = StockPrescreener()
 
     async def _execute_buy(self, rec: dict, validation: dict, balance: float):
@@ -76,7 +77,7 @@ class TradingWorkflow:
         print(f"Fetching quote for {symbol}...")
         quote = await self.market_data.get_quote(symbol)
         current_price = quote.price
-        
+
         size_pct = validation.get("new_size_pct", rec.get("size_pct", 0.05))
         quantity = int((balance * size_pct) / current_price)
 
@@ -117,7 +118,7 @@ class TradingWorkflow:
 
         # 4. Prescreen FTSE 100 stocks
         print("\nPrescreening FTSE 100 stocks using technical indicators...")
-        
+
         ftse100_tickers = [
             "III.L",    # 3i Group
             "ADM.L",    # Admiral Group
@@ -218,14 +219,14 @@ class TradingWorkflow:
             "WTB.L",    # Whitbread
             "WPP.L"     # WPP
         ]
-        
+
         print(f"Checking {len(ftse100_tickers)} FTSE 100 stocks...")
-        
+
         prescreened_tickers = await self.prescreener.prescreen_stocks(
             ftse100_tickers,
             self.market_data
         )
-        
+
         passed_count = sum(1 for v in prescreened_tickers.values() if v.get("passed", False))
         print(f"Prescreened {passed_count} / {len(ftse100_tickers)} stocks")
 
@@ -241,7 +242,7 @@ class TradingWorkflow:
 
         # 6. Local AI Analysis on prescreened stocks with news
         print("\nRunning AI Analysis on Prescreened Stocks with News...")
-        
+
         max_retries = self.settings.AI_MAX_RETRIES
         retry_delay = self.settings.AI_RETRY_DELAY_SECONDS
         analysis = {
@@ -262,7 +263,9 @@ class TradingWorkflow:
             except Exception as e:
                 if attempt < max_retries - 1:
                     delay = retry_delay * (attempt + 1)
-                    print(f"  Analysis attempt {attempt + 1}/{max_retries} failed: {e}. Retrying in {delay}s...", end='', flush=True)
+                    msg = (f"  Analysis attempt {attempt + 1}/{max_retries} failed: {e}. "
+                           f"Retrying in {delay}s...",)
+                    print(msg, end='', flush=True)
                     await asyncio.sleep(delay)
                 else:
                     print(f"\nAll {max_retries} attempts failed. Using fallback.")
@@ -281,9 +284,9 @@ class TradingWorkflow:
         recommendations = analysis.get("recommendations", [])
         for rec in recommendations:
             try:
-                if rec["action"] == "BUY" and rec["confidence"] > 0.8:
-                    print(f"\nValidating BUY for {rec['symbol']} with Remote AI...")
-                    
+                if rec["action"] in ["BUY", "SELL"]:
+                    print(f"\nValidating {rec['action']} for {rec['symbol']} with Remote AI...")
+
                     validation = await self.decision_engine.validate_with_remote_ai(
                         action=rec["action"],
                         symbol=rec["symbol"],
@@ -298,11 +301,13 @@ class TradingWorkflow:
 
                     if validation["decision"] == "PROCEED":
                         await self._execute_buy(rec, validation, balance)
+                        await self.repo.mark_decision_executed(rec["symbol"])
                     elif validation["decision"] == "MODIFY":
                         modified_rec = rec.copy()
                         modified_rec["confidence"] = validation.get("new_confidence", rec["confidence"])
                         modified_rec["size_pct"] = validation.get("new_size_pct", rec.get("size_pct", 0.05))
                         await self._execute_buy(modified_rec, validation, balance)
+                        await self.repo.mark_decision_executed(rec["symbol"])
                     else:
                         print(f"REJECTED by Remote AI: {validation.get('comments', 'No reason provided')}")
 
@@ -315,7 +320,7 @@ class TradingWorkflow:
     async def _fetch_filtered_news(self, prescreened_tickers: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict]]:
         """Fetch news only for prescreened tickers."""
         filtered_news = {}
-        
+
         for ticker, indicators in prescreened_tickers.items():
             if indicators.get("passed", False):
                 try:
@@ -324,22 +329,26 @@ class TradingWorkflow:
                         filtered_news[ticker] = news
                 except Exception:
                     pass
-        
+
         return filtered_news
-    
-    def _create_filtered_news_summary(self, prescreened_tickers: Dict[str, Dict[str, Any]], filtered_news: Dict[str, List[Dict]]) -> str:
+
+    def _create_filtered_news_summary(
+        self,
+        prescreened_tickers: Dict[str, Dict[str, Any]],
+        filtered_news: Dict[str, List[Dict]]
+    ) -> str:
         """Create news summary focused on prescreened stocks."""
         if not filtered_news:
             return "No recent news available for prescreened stocks."
-        
+
         summary = "News for Prescreened Stocks:\n"
-        
+
         for ticker, news_items in filtered_news.items():
             for item in news_items:
                 title = item.get("title", "No title")
                 publisher = item.get("publisher", "Unknown")
                 summary += f"\n{ticker}:\n  - [{publisher}] {title}\n"
-        
+
         return summary
 
     async def run_monitoring_loop(self):

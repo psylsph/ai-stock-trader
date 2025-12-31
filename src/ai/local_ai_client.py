@@ -1,16 +1,12 @@
 import asyncio
 import json
 import random
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import Dict, Any, List, Tuple, TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .tools import TradingTools
 
-try:
-    from openai import AsyncOpenAI
-except ImportError:
-    AsyncOpenAI = None
+from openai import AsyncOpenAI
 
 from .prompts import (
     SYSTEM_PROMPT,
@@ -44,7 +40,7 @@ class LocalAIClient:
         func,
         max_retries: int = 3,
         base_delay: float = 1.0
-    ):
+    ) -> Any:
         """Wrapper to retry API calls with exponential backoff."""
         for attempt in range(max_retries):
             try:
@@ -67,7 +63,7 @@ class LocalAIClient:
     async def _stream_chat_completion(
         self,
         messages: List[Dict[str, Any]],
-        tools: List[Dict[str, Any]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
         print_tokens: bool = True
     ) -> Tuple[str, List]:
         """Stream chat completion and print tokens as they arrive."""
@@ -78,25 +74,25 @@ class LocalAIClient:
         }
         if tools:
             kwargs["tools"] = tools
-        
-        stream = await self.client.chat.completions.create(**kwargs)
-        
+
+        stream = await self.client.chat.completions.create(**kwargs)  # type: ignore[arg-type]
+
         full_content = ""
         tool_calls_buffer = []
         tool_calls_dict = {}
-        
+
         try:
             async for chunk in stream:
                 if not chunk.choices:
                     continue
-                    
+
                 delta = chunk.choices[0].delta
-                
+
                 if delta.content:
                     full_content += delta.content
                     if print_tokens:
                         print(delta.content, end='', flush=True)
-                
+
                 if delta.tool_calls:
                     for tool_call in delta.tool_calls:
                         if tool_call.id not in tool_calls_dict:
@@ -108,18 +104,18 @@ class LocalAIClient:
                                     "arguments": ""
                                 }
                             }
-                        
+
                         if tool_call.function:
                             if tool_call.function.name:
                                 tool_calls_dict[tool_call.id]["function"]["name"] = tool_call.function.name
                             if tool_call.function.arguments:
                                 tool_calls_dict[tool_call.id]["function"]["arguments"] += tool_call.function.arguments
-                    
+
         except Exception as e:
             print(f"  [Streaming Error: {e}]")
-        
+
         tool_calls_buffer = list(tool_calls_dict.values())
-        
+
         if print_tokens:
             print()
         return full_content, tool_calls_buffer
@@ -165,16 +161,16 @@ class LocalAIClient:
                     print_tokens=True
                 )
             )
-            
+
             reasoning_chain.append(f"AI reasoning: {full_content}")
-            
+
             if not tool_calls:
                 break
-            
+
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 print(f"\n[Tool Call: {function_name}]", end='', flush=True)
-                
+
                 arguments = json.loads(tool_call.function.arguments)
 
                 tool_result = await tools.execute_tool(function_name, arguments)
@@ -183,7 +179,7 @@ class LocalAIClient:
                     print("[Running vision analysis...]", end='', flush=True)
                     chart_path = tool_result["chart_path"]
                     chart_base64 = tools.chart_fetcher.image_to_base64(chart_path)
-                    
+
                     vision_response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=[
@@ -192,7 +188,11 @@ class LocalAIClient:
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": "Analyze this stock chart for trading signals, trends, support/resistance levels, and potential entry/exit points."
+                                        "text": (
+                                            "Analyze this stock chart for trading signals, "
+                                            "trends, support/resistance levels, and potential "
+                                            "entry/exit points."
+                                        )
                                     },
                                     {
                                         "type": "image_url",
@@ -200,18 +200,19 @@ class LocalAIClient:
                                     }
                                 ]
                             }
-                        ]
+                        ],
+                        stream=True
                     )
-                    
+
                     vision_content = ""
                     try:
-                        async for chunk in vision_response:
+                        async for chunk in vision_response:  # type: ignore[attr-defined]
                             if chunk.choices and chunk.choices[0].delta.content:
                                 vision_content += chunk.choices[0].delta.content
                                 print(chunk.choices[0].delta.content, end='', flush=True)
                     except Exception:
                         pass
-                    
+
                     print()
                     tool_result["vision_analysis"] = vision_content
 
@@ -222,13 +223,13 @@ class LocalAIClient:
                 })
 
             tool_call_count += 1
-        
+
         print("\n[Finalizing recommendations...]", end='', flush=True)
         final_content, _ = await self._stream_chat_completion(
             messages=messages,
             print_tokens=True
         )
-        
+
         try:
             return json.loads(final_content)
         except json.JSONDecodeError:
@@ -250,7 +251,7 @@ class LocalAIClient:
     ) -> Dict[str, Any]:
         """Analyze a position using local AI."""
         print(f"[Checking position: {symbol}]", end='', flush=True)
-        
+
         pnl_percent = ((current_price - entry_price) / entry_price) * 100
 
         prompt = LOCAL_POSITION_CHECK_PROMPT.format(
@@ -283,7 +284,7 @@ class LocalAIClient:
                 print_tokens=True
             )
         )
-        
+
         try:
             return json.loads(full_content)
         except Exception:

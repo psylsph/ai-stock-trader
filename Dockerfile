@@ -28,7 +28,6 @@ EXPOSE 8000
 
 # Set environment variables (placeholders, should be provided at runtime)
 ENV OPENROUTER_API_KEY=""
-ENV MARKET_DATA_API_KEY="yahoo"
 
 # Run the application
 ENTRYPOINT ["python", "-m", "src.main"]

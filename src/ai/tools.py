@@ -7,7 +7,7 @@ from src.market.data_fetcher import MarketDataFetcher
 
 class TradingTools:
     """Collection of tools for AI trading agent."""
-    
+
     def __init__(
         self,
         news_fetcher: YahooNewsFetcher,
@@ -17,7 +17,7 @@ class TradingTools:
         self.news_fetcher = news_fetcher
         self.chart_fetcher = chart_fetcher
         self.data_fetcher = data_fetcher
-    
+
     def get_tool_schemas(self) -> list[Dict[str, Any]]:
         """Return tool schemas for OpenAI function calling."""
         return [
@@ -105,7 +105,7 @@ class TradingTools:
                 }
             }
         ]
-    
+
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool by name with provided arguments."""
         try:
@@ -115,7 +115,7 @@ class TradingTools:
                     limit=arguments.get("limit", 5)
                 )
                 return {"news": news}
-            
+
             elif tool_name == "get_price_history":
                 history = await self.data_fetcher.get_historical(
                     symbol=arguments["symbol"],
@@ -134,7 +134,7 @@ class TradingTools:
                         for h in history
                     ]
                 }
-            
+
             elif tool_name == "get_current_quote":
                 quote = await self.data_fetcher.get_quote(arguments["symbol"])
                 return {
@@ -145,7 +145,7 @@ class TradingTools:
                     "volume": quote.volume,
                     "timestamp": quote.timestamp.isoformat()
                 }
-            
+
             elif tool_name == "analyze_chart":
                 chart_path = await self.chart_fetcher.fetch_chart_image(
                     symbol=arguments["symbol"],
@@ -156,10 +156,11 @@ class TradingTools:
                         "chart_path": chart_path,
                         "analysis_needed": True
                     }
-                return {"error": "Failed to fetch chart"}
-            
+                else:
+                    return {"error": "Failed to fetch chart"}
+
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
-                
+
         except Exception as e:
             return {"error": str(e)}

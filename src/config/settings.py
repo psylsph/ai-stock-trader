@@ -1,6 +1,5 @@
 """Configuration settings for the AI Stock Trader application."""
 
-from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +13,7 @@ class Settings(BaseSettings):
     LM_STUDIO_MODEL: str = "zai-org/glm-4.6v-flash"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
-    
+
     # Streaming & Retry Configuration
     USE_STREAMING: bool = True
     AI_MAX_RETRIES: int = 3
@@ -27,9 +26,9 @@ class Settings(BaseSettings):
     TRADING_MODE: str = "paper"  # "paper" or "live"
     CHECK_INTERVAL_SECONDS: int = 300
     INITIAL_BALANCE: float = 10000.0
+    MAX_POSITIONS: int = 5  # Maximum number of open positions
 
     # Market Data
-    MARKET_DATA_API_KEY: Optional[str] = None
     RSS_FEEDS: list[str] = [
         "https://news.yahoo.com/rss/uk",
         "https://finance.yahoo.com/news/rssindex",

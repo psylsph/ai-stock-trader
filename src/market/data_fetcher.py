@@ -9,12 +9,12 @@ from typing import List, Optional
 try:
     from pydantic import BaseModel  # pylint: disable=import-error
 except ImportError:
-    BaseModel = object
+    BaseModel = object  # type: ignore[misc, assignment]
 
 try:
-    import aiohttp  # pylint: disable=import-error
+    import aiohttp  # type: ignore[import-not-found]  # pylint: disable=import-error
 except ImportError:
-    aiohttp = None
+    aiohttp = None  # type: ignore[assignment]
 
 try:
     import yfinance as yf  # pylint: disable=import-error
@@ -167,7 +167,7 @@ class AlphaVantageFetcher(MarketDataFetcher):
         self.api_key = api_key
         self.base_url = "https://www.alphavantage.co/query"
         self.tz = pytz.timezone("Europe/London")
-        self.last_request_time = 0
+        self.last_request_time = 0.0
         self.min_interval = 1.1  # 1.1s to be safe
 
     def _format_symbol(self, symbol: str) -> str:

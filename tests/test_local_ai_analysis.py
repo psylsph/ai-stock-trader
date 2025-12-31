@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 from src.ai.tools import TradingTools
 from src.market.yahoo_news_fetcher import YahooNewsFetcher
 from src.market.chart_fetcher import ChartFetcher
@@ -27,7 +26,7 @@ async def test_tool_execution():
     chart_fetcher = ChartFetcher()
     data_fetcher = YahooFinanceFetcher()
     tools = TradingTools(news_fetcher, chart_fetcher, data_fetcher)
-    
+
     result = await tools.execute_tool("get_current_quote", {"symbol": "LLOY.L"})
     assert "symbol" in result
     assert result["symbol"] == "LLOY.L"
