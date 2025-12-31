@@ -1,8 +1,10 @@
 """Verification script for local AI with LM Studio."""
 
 import asyncio
+import pytest
 from openai import AsyncOpenAI
 
+@pytest.mark.asyncio
 async def test_lm_studio():
     """Test LM Studio connection and basic AI functionality."""
     

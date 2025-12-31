@@ -115,7 +115,7 @@ Return your response in strict JSON format:
         Check position with local AI, escalate if needed.
         Returns a decision dict: {"action": "HOLD"|"SELL", "reasoning": "...", "escalated": bool}
         """
-        holding_days = (datetime.utcnow() - position.entry_date).days
+        holding_days = (datetime.now(timezone.utc) - position.entry_date).days
 
         # 1. Local Check
         local_decision = await self.local_ai.analyze_position(
@@ -149,8 +149,92 @@ Return your response in strict JSON format:
             }
 
         return {
-            "action": action,
-            "reasoning": local_decision.get("reasoning"),
-            "confidence": confidence,
-            "escalated": False
-        }
+                "action": action,
+                "reasoning": local_decision.get("reasoning"),
+                "confidence": confidence,
+                "escalated": False
+            }
+
+    async def startup_analysis_with_prescreening(
+        self,
+        portfolio_summary: str,
+        market_status: str,
+        prescreened_tickers: Dict[str, Dict[str, Any]],
+        rss_news_summary: str,
+        tools: 'TradingTools' = None
+    ) -> Dict[str, Any]:
+        """
+        Run analysis on prescreened stocks with targeted news data.
+        
+        Args:
+            prescreened_tickers: Dict of ticker to indicator results
+            rss_news_summary: News data for prescreened stocks only
+        """
+        prompt = f"""
+You are analyzing a pre-filtered set of FTSE 100 stocks.
+
+Prescreened Stocks ({len(prescreened_tickers)} stocks):
+{', '.join(prescreened_tickers.keys())}
+
+Indicator Results:
+"""
+        for ticker, indicators in prescreened_tickers.items():
+            prompt += f"""
+{ticker}:
+  - RSI (14): {indicators['rsi']:.1f}
+  - MACD: {indicators['macd']:.2f} (Signal: {'Bullish' if indicators['signal'] > 0 else 'Bearish'})
+  - SMA 50: £{indicators['sma_50']:.2f}
+  - SMA 200: £{indicators['sma_200']:.2f}
+  - Current Price: £{indicators['current_price']:.2f}
+  - Passed Prescreening: {indicators['passed']}
+"""
+
+        prompt += f"""
+
+Portfolio Status:
+{portfolio_summary}
+
+Market Status:
+{market_status}
+
+Task: Analyze the prescreened stocks with their news data and provide trading recommendations.
+Consider each stock's technical setup and sentiment from their news.
+
+Return your response in strict JSON format:
+{{
+    "analysis_summary": "...",
+    "recommendations": [
+        {{
+            "action": "BUY"|"SELL"|"HOLD",
+            "symbol": "...",
+            "reasoning": "...",
+            "confidence": 0.85,
+            "size_pct": 0.1
+        }}
+    ]
+}}
+"""
+
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Chief UK Market Strategist & Senior Equity Trader with deep expertise in London Stock Exchange (LSE)."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+
+        full_content, _ = await self.local_ai._stream_chat_completion(
+            messages=messages,
+            print_tokens=True
+        )
+
+        try:
+            return json.loads(full_content)
+        except json.JSONDecodeError:
+            return {
+                "analysis_summary": full_content,
+                "recommendations": []
+            }

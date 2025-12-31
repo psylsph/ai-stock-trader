@@ -16,9 +16,12 @@ async def main():
     """Main function to run the AI Stock Trader bot."""
     parser = argparse.ArgumentParser(description="AI Stock Trader Bot")
     parser.add_argument("--restart", action="store_true", help="Reset the database before starting")
+    parser.add_argument("--web", action="store_true", help="Start web server")
     args = parser.parse_args()
 
     logger.info("Starting AI Stock Trader Bot...")
+    logger.info(f"[DEBUG] Web server flag: {args.web}")
+    logger.info(f"[DEBUG] LM Studio URL: {settings.LM_STUDIO_API_URL}")
 
     # Initialize Database
     if args.restart:
@@ -44,6 +47,9 @@ async def main():
         logger.info("Bot stopped by user.")
     except Exception as e:  # pylint: disable=broad-except
         logger.error("Fatal error: %s", e, exc_info=True)
+
+    logger.info("[DEBUG] Trading workflow completed. Web server was NOT started.")
+    logger.info("[DEBUG] To start web server, you need to add uvicorn startup code")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,9 +1,11 @@
 """Test streaming functionality with LM Studio."""
 
 import asyncio
+import pytest
 from openai import AsyncOpenAI
 
 
+@pytest.mark.asyncio
 async def test_streaming():
     """Test LM Studio connection with streaming."""
     

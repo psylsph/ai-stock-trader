@@ -102,3 +102,23 @@ class DatabaseRepository:
         async with self.session_maker() as session:
             session.add(decision)
             await session.commit()
+
+    async def get_pending_decisions(self) -> List[AIDecision]:
+        """Get all pending AI decisions from the database.
+
+        Returns:
+            List of AIDecision objects.
+        """
+        async with self.session_maker() as session:
+            result = await session.execute(select(AIDecision))
+            return list(result.scalars().all())
+
+    async def get_all_decisions(self) -> List[AIDecision]:
+        """Get all AI decisions from the database.
+
+        Returns:
+            List of AIDecision objects.
+        """
+        async with self.session_maker() as session:
+            result = await session.execute(select(AIDecision))
+            return list(result.scalars().all())

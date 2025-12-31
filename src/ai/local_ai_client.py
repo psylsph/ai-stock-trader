@@ -29,6 +29,8 @@ class LocalAIClient:
             api_url: The LM Studio API URL (e.g., http://localhost:1234/v1)
             model: The model identifier shown in LM Studio.
         """
+        print(f"[DEBUG] Initializing LocalAIClient with URL: {api_url}")
+        print(f"[DEBUG] Model: {model}")
         if AsyncOpenAI is None:
             raise ImportError("openai library is required. Install with: pip install openai")
         self.client = AsyncOpenAI(
@@ -81,6 +83,7 @@ class LocalAIClient:
         
         full_content = ""
         tool_calls_buffer = []
+        tool_calls_dict = {}
         
         try:
             async for chunk in stream:
@@ -95,10 +98,27 @@ class LocalAIClient:
                         print(delta.content, end='', flush=True)
                 
                 if delta.tool_calls:
-                    tool_calls_buffer.extend(delta.tool_calls or [])
+                    for tool_call in delta.tool_calls:
+                        if tool_call.id not in tool_calls_dict:
+                            tool_calls_dict[tool_call.id] = {
+                                "id": tool_call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": ""
+                                }
+                            }
+                        
+                        if tool_call.function:
+                            if tool_call.function.name:
+                                tool_calls_dict[tool_call.id]["function"]["name"] = tool_call.function.name
+                            if tool_call.function.arguments:
+                                tool_calls_dict[tool_call.id]["function"]["arguments"] += tool_call.function.arguments
                     
         except Exception as e:
             print(f"  [Streaming Error: {e}]")
+        
+        tool_calls_buffer = list(tool_calls_dict.values())
         
         if print_tokens:
             print()

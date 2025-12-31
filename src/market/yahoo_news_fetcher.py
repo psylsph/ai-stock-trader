@@ -1,5 +1,6 @@
+import asyncio
 import yfinance as yf
-from typing import List, Dict
+from typing import List, Dict, Any
 
 
 class YahooNewsFetcher:
@@ -15,8 +16,13 @@ class YahooNewsFetcher:
         Returns:
             List of news items with title, link, published_date
         """
-        ticker = yf.Ticker(symbol)
-        news = ticker.news
+        loop = asyncio.get_event_loop()
+        
+        def _fetch_news():
+            ticker = yf.Ticker(symbol)
+            return ticker.news
+        
+        news = await loop.run_in_executor(None, _fetch_news)
         
         if not news:
             return []

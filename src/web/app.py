@@ -1,19 +1,29 @@
+from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from src.database.repository import DatabaseRepository
+from src.database import init_db
 from src.config import settings
 import os
 
 app = FastAPI(title="AI Stock Trader Dashboard")
 templates = Jinja2Templates(directory="src/web/templates")
 
-# Global repository instance to be set at startup
-repo: DatabaseRepository = None
+# Global repository instance
+repo: Optional[DatabaseRepository] = None
 
 def set_repo(r: DatabaseRepository):
     global repo
     repo = r
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection on startup."""
+    global repo
+    print("[DEBUG] Web server initializing database...")
+    repo = await init_db(settings.DATABASE_URL, reset=False)
+    print("[DEBUG] Web server database initialized")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):

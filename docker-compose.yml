@@ -2,6 +2,21 @@ services:
   trading-bot:
     build: .
     container_name: ai-stock-trader
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/trading.db
+      - PORTFOLIO_FILE=/app/data/portfolio.json
+      - LM_STUDIO_API_URL=http://192.168.1.227:1234/v1
+    restart: unless-stopped
+    depends_on:
+      - web
+
+  web:
+    build: .
+    container_name: ai-stock-trader-web
     ports:
       - "8000:8000"
     volumes:
@@ -11,4 +26,5 @@ services:
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/trading.db
       - PORTFOLIO_FILE=/app/data/portfolio.json
+    entrypoint: ["python", "-m", "uvicorn", "src.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
