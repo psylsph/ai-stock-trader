@@ -120,6 +120,18 @@ class LocalAIClient:
             print()
         return full_content, tool_calls_buffer
 
+    def _clean_json_response(self, text: str) -> str:
+        """Clean AI output to extract valid JSON."""
+        import re
+        # Remove [THINK] blocks
+        text = re.sub(r'\[THINK\].*?\[/THINK\]', '', text, flags=re.DOTALL)
+        # Find the first { and last }
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            return text[start:end+1]
+        return text
+
     async def analyze_market_with_tools(
         self,
         portfolio_summary: str,
@@ -131,10 +143,33 @@ class LocalAIClient:
         """Analyze market using local AI with tools."""
         print("\n[Local AI Analyzing Market with Tools...]")
 
+        output_instructions = """
+CRITICAL OUTPUT INSTRUCTIONS:
+1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
+2. The "analysis_summary" field should provide high-level market context ONLY.
+3. DO NOT put actionable recommendations inside "analysis_summary".
+4. If there are no stocks to recommend, return an empty list for "recommendations".
+5. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+
+Return your response in strict JSON format:
+{
+    "analysis_summary": "High level market overview...",
+    "recommendations": [
+        {
+            "action": "BUY"|"SELL"|"HOLD",
+            "symbol": "...",
+            "reasoning": "...",
+            "confidence": 0.85,
+            "size_pct": 0.1
+        }
+    ]
+}
+"""
+
         messages = [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT
+                "content": SYSTEM_PROMPT + "\n\n" + output_instructions
             },
             {
                 "role": "user",
@@ -230,8 +265,10 @@ class LocalAIClient:
             print_tokens=True
         )
 
+        cleaned_content = self._clean_json_response(final_content)
+
         try:
-            return json.loads(final_content)
+            return json.loads(cleaned_content)
         except json.JSONDecodeError:
             return {
                 "analysis_summary": final_content,
@@ -286,7 +323,8 @@ class LocalAIClient:
         )
 
         try:
-            return json.loads(full_content)
+            cleaned_content = self._clean_json_response(full_content)
+            return json.loads(cleaned_content)
         except Exception:
             return {
                 "decision": "HOLD",

@@ -1,6 +1,6 @@
 """Database repository for managing database operations."""
 
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta
 
 from sqlalchemy import select, and_, or_
@@ -113,7 +113,9 @@ class DatabaseRepository:
         symbol: str,
         remote_validation_decision: str,
         remote_validation_comments: str,
-        requires_manual_review: bool
+        requires_manual_review: bool,
+        new_confidence: Optional[float] = None,
+        new_context: Optional[dict] = None
     ):
         """Update existing AIDecision with remote validation results."""
         async with self.session_maker() as session:
@@ -121,6 +123,7 @@ class DatabaseRepository:
                 select(AIDecision)
                 .where(and_(AIDecision.symbol == symbol, AIDecision.ai_type == "local"))
                 .order_by(AIDecision.timestamp.desc())
+                .limit(1)
             )
             result = await session.execute(stmt)
             decision = result.scalar_one_or_none()
@@ -130,6 +133,10 @@ class DatabaseRepository:
                 decision.remote_validation_comments = remote_validation_comments
                 decision.validation_timestamp = datetime.utcnow()
                 decision.requires_manual_review = requires_manual_review
+                if new_confidence is not None:
+                    decision.confidence = new_confidence
+                if new_context is not None:
+                    decision.context = new_context
                 await session.commit()
 
     async def get_pending_decisions(self, timeout_minutes: int = 60) -> List[AIDecision]:
@@ -139,8 +146,8 @@ class DatabaseRepository:
             result = await session.execute(
                 select(AIDecision).where(
                     and_(
-                        AIDecision.requires_manual_review is True,
-                        AIDecision.executed is False,
+                        AIDecision.requires_manual_review == True,
+                        AIDecision.executed == False,
                         or_(
                             AIDecision.manual_review_timeout.is_(None),
                             AIDecision.manual_review_timeout > timeout_threshold
@@ -148,6 +155,26 @@ class DatabaseRepository:
                     )
                 )
             )
+            return list(result.scalars().all())
+
+    async def get_pending_executions(self) -> List[AIDecision]:
+        """Get decisions that are validated to PROCEED but not yet executed."""
+        async with self.session_maker() as session:
+            stmt = (
+                select(AIDecision)
+                .where(
+                    and_(
+                        AIDecision.executed == False,
+                        or_(
+                            AIDecision.remote_validation_decision == "PROCEED",
+                            AIDecision.remote_validation_decision == "MODIFY",
+                            AIDecision.remote_validation_decision == "MANUAL_APPROVE"
+                        ),
+                        AIDecision.requires_manual_review == False
+                    )
+                )
+            )
+            result = await session.execute(stmt)
             return list(result.scalars().all())
 
     async def mark_decision_executed(self, symbol: str):
@@ -158,6 +185,7 @@ class DatabaseRepository:
                 select(AIDecision)
                 .where(AIDecision.symbol == symbol)
                 .order_by(AIDecision.timestamp.desc())
+                .limit(1)
             )
             result = await session.execute(stmt)
             decision = result.scalar_one_or_none()
@@ -174,6 +202,7 @@ class DatabaseRepository:
                 select(AIDecision)
                 .where(AIDecision.symbol == symbol)
                 .order_by(AIDecision.timestamp.desc())
+                .limit(1)
             )
             result = await session.execute(stmt)
             decision = result.scalar_one_or_none()

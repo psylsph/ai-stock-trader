@@ -109,8 +109,18 @@
                             <td class="px-6 py-4 text-right">
                                 <span id="validation-{{ symbol }}" class="px-2 py-1 text-xs font-bold rounded"></span>
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-400 max-w-xs truncate" title="{{ decision.context.rec.reasoning }}">
-                                {{ decision.context.rec.reasoning }}
+                            <td class="px-6 py-4 text-sm text-gray-400 max-w-xs">
+                                <div class="truncate cursor-help" id="reasoning-text-{{ symbol }}">
+                                    {% if decision.remote_validation_comments %}
+                                        {{ decision.remote_validation_comments }}
+                                    {% elif decision.response and decision.response.reasoning %}
+                                        {{ decision.response.reasoning }}
+                                    {% elif decision.context and decision.context.rec and decision.context.rec.reasoning %}
+                                        {{ decision.context.rec.reasoning }}
+                                    {% else %}
+                                        No reasoning provided
+                                    {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% endfor %}
@@ -146,14 +156,19 @@
                 </table>
             </div>
         </div>
+    </main>
 
     <script>
         let currentData = null;
 
         async function fetchData() {
-            const response = await fetch('/api/status');
-            currentData = await response.json();
-            updateDashboard();
+            try {
+                const response = await fetch('/api/status');
+                currentData = await response.json();
+                updateDashboard();
+            } catch (error) {
+                console.error("Error fetching status:", error);
+            }
         }
 
         function updateDashboard() {
@@ -172,15 +187,44 @@
             for (const [symbol, decision] of Object.entries(decisions)) {
                 const statusCell = document.getElementById(`status-${symbol}`);
                 const validationCell = document.getElementById(`validation-${symbol}`);
+                const reasoningText = document.getElementById(`reasoning-text-${symbol}`);
 
                 if (!statusCell || !validationCell) continue;
 
                 const badge = getValidationBadge(decision);
                 statusCell.textContent = badge.status;
-                validationCell.textContent = badge.validation;
+                
+                // Simplified Validation text
+                let validationText = badge.validation;
+                if (decision.remote_validation_decision === 'MODIFY') {
+                    validationText = 'Modified';
+                } else if (decision.remote_validation_decision === 'REJECT') {
+                    validationText = 'Rejected';
+                }
+                validationCell.textContent = validationText;
+
+                if (reasoningText) {
+
+                    let reason = "No reasoning provided";
+                    if (decision.remote_validation_comments) {
+                        reason = decision.remote_validation_comments;
+                    } else if (decision.response && decision.response.reasoning) {
+                        reason = decision.response.reasoning;
+                    } else if (decision.context && decision.context.rec && decision.context.rec.reasoning) {
+                        reason = decision.context.rec.reasoning;
+                    }
+                    reasoningText.textContent = reason;
+                    reasoningText.title = reason;
+                }
 
                 if (badge.status === '⏳') {
                     statusCell.className = 'px-2 py-1 bg-yellow-400/10 text-yellow-400 text-xs font-bold rounded uppercase';
+                } else if (badge.status === '✓') {
+                    statusCell.className = 'px-2 py-1 bg-green-400/10 text-green-400 text-xs font-bold rounded uppercase';
+                } else if (badge.status === '✗') {
+                    statusCell.className = 'px-2 py-1 bg-red-400/10 text-red-400 text-xs font-bold rounded uppercase';
+                } else {
+                    statusCell.className = 'px-2 py-1 text-xs font-bold rounded uppercase';
                 }
             }
         }
@@ -207,15 +251,7 @@
             }
 
             if (decision.requires_manual_review && !decision.executed) {
-                const timeRemaining = getTimeRemaining(decision);
-                const countdown = document.getElementById(`countdown-${decision.symbol}`);
-
-                if (countdown) {
-                    countdown.textContent = `⏱ ${timeRemaining}`;
-                    if (timeRemaining === 'TIMEOUT') {
-                        countdown.classList.add('text-red');
-                    }
-                }
+                return { status: '⏳', validation: 'Pending Review' };
             }
 
             return { status: '⏳', validation: 'Waiting for validation' };
@@ -295,6 +331,7 @@
             await fetchData();
         }
 
+        setInterval(fetchData, 5000);
         fetchData();
     </script>
 </body>

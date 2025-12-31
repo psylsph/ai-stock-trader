@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # LM Studio Configuration
     LM_STUDIO_API_URL: str = "http://localhost:1234/v1"
-    LM_STUDIO_MODEL: str = "zai-org/glm-4.6v-flash"
+    LM_STUDIO_MODEL: str = "mistralai/ministral-3-14b-reasoning"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
 
@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     CHECK_INTERVAL_SECONDS: int = 300
     INITIAL_BALANCE: float = 10000.0
     MAX_POSITIONS: int = 5  # Maximum number of open positions
+    MAX_POSITION_SIZE_PCT: float = 0.20  # Max size of a single position (20%)
 
     # Market Data
     RSS_FEEDS: list[str] = [

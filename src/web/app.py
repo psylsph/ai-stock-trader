@@ -106,6 +106,20 @@ async def get_status():
         if decision.symbol not in latest_decisions:
             latest_decisions[decision.symbol] = decision
 
+    latest_decisions_json = {}
+    for symbol, d in latest_decisions.items():
+        latest_decisions_json[symbol] = {
+            "timestamp": d.timestamp.isoformat(),
+            "symbol": d.symbol,
+            "decision": d.decision,
+            "confidence": d.confidence,
+            "remote_validation_decision": d.remote_validation_decision,
+            "remote_validation_comments": d.remote_validation_comments,
+            "executed": d.executed,
+            "requires_manual_review": d.requires_manual_review,
+            "context": d.context
+        }
+
     return {
         "positions": [
             {
@@ -116,8 +130,16 @@ async def get_status():
                 "pnl_pct": ((p.current_price - p.entry_price) / p.entry_price * 100) if p.entry_price else 0
             } for p in positions
         ],
-        "latest_decisions": latest_decisions,
-        "pending_decisions": pending_decisions,
+        "latest_decisions": latest_decisions_json,
+        "pending_decisions": [
+            {
+                "symbol": d.symbol,
+                "decision": d.decision,
+                "confidence": d.confidence,
+                "timestamp": d.timestamp.isoformat(),
+                "manual_review_timeout": d.manual_review_timeout.isoformat() if d.manual_review_timeout else None
+            } for d in pending_decisions
+        ],
         "balance": balance,
         "total_value": total_value,
         "total_market_value": total_market_value,

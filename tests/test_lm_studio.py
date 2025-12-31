@@ -4,8 +4,15 @@ import asyncio
 import base64
 from io import BytesIO
 import pytest
+import os
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionToolParam
+
+# Skip by default unless RUN_AI_TESTS is set
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_AI_TESTS") != "true",
+    reason="AI integration tests disabled by default"
+)
 
 try:
     from PIL import Image
@@ -30,29 +37,46 @@ async def test_lm_studio():
     # Test 1: Simple chat
     print("\n1. Testing simple chat...")
     response = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
-        messages=[{'role': 'user', 'content': 'Respond with just the word TEST'}]
+        model='mistralai/ministral-3-14b-reasoning',
+        messages=[{'role': 'user', 'content': 'DO NOT THINK. Respond with just the word TEST.'}]
     )
     content = response.choices[0].message.content
     assert content is not None, "Response content is None"
-    response_content = content.strip()
-    print(f"Response: {response_content}")
-    assert response_content == "TEST", f"Simple chat failed (got '{response_content}')"
+    
+    # Clean thinking tags if present
+    import re
+    cleaned_content = re.sub(r'\[THINK\].*?\[/THINK\]', '', content, flags=re.DOTALL).strip()
+    
+    print(f"Response: {cleaned_content}")
+    assert cleaned_content == "TEST", f"Simple chat failed (got '{cleaned_content}')"
     print(" Simple chat: PASSED")
 
     # Test 2: JSON response
     print("\n2. Testing JSON response...")
     response = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
+        model='mistralai/ministral-3-14b-reasoning',
         messages=[{
             'role': 'system',
             'content': 'You are a helpful assistant. Respond in JSON format.'
         }, {
             'role': 'user',
-            'content': 'Respond with {"status": "ok", "message": "working"}'
+            'content': 'DO NOT THINK. Respond with {"status": "ok", "message": "working"}.'
         }]
     )
     json_content = response.choices[0].message.content
+    assert json_content is not None
+    
+    # Clean and parse
+    import json
+    cleaned_json = re.sub(r'\[THINK\].*?\[/THINK\]', '', json_content, flags=re.DOTALL)
+    # Extract JSON between braces
+    start = cleaned_json.find('{')
+    end = cleaned_json.rfind('}')
+    if start != -1 and end != -1:
+        cleaned_json = cleaned_json[start:end+1]
+    
+    parsed = json.loads(cleaned_json)
+    assert parsed["status"] == "ok"
     print(f"Response: {json_content}")
     print(" JSON response: PASSED")
 
@@ -71,8 +95,8 @@ async def test_lm_studio():
     }]
 
     response = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
-        messages=[{'role': 'user', 'content': 'What time is it?'}],
+        model='mistralai/ministral-3-14b-reasoning',
+        messages=[{'role': 'user', 'content': 'DO NOT THINK. What time is it?'}],
         tools=tools
     )
 
@@ -94,13 +118,13 @@ async def test_lm_studio():
     img_base64 = base64.b64encode(img_bytes.read()).decode('utf-8')
 
     response = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
+        model='mistralai/ministral-3-14b-reasoning',
         messages=[{
             'role': 'user',
             'content': [
                 {
                     'type': 'text',
-                    'text': 'What do you see in this image?'
+                    'text': 'DO NOT THINK. What do you see in this image?'
                 },
                 {
                     'type': 'image_url',

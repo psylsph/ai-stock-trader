@@ -18,6 +18,7 @@ from src.market.yahoo_news_fetcher import YahooNewsFetcher
 from src.market.chart_fetcher import ChartFetcher
 from src.ai.tools import TradingTools
 from src.trading.prescreening import StockPrescreener
+from src.database.models import AIDecision
 from src.config.web_mode_config import web_mode
 
 
@@ -67,30 +68,87 @@ class TradingWorkflow:
 
         self.broker = PaperTrader(repo, self.market_data, settings.INITIAL_BALANCE)
         self.position_manager = PositionManager(repo)
-        self.risk_manager = RiskManager()
+        self.risk_manager = RiskManager(
+            max_position_pct=settings.MAX_POSITION_SIZE_PCT,
+            max_positions=settings.MAX_POSITIONS
+        )
 
         self.prescreener = StockPrescreener()
+        self.last_full_portfolio_revaluation = datetime.min
 
-    async def _execute_buy(self, rec: dict, validation: dict, balance: float):
-        """Execute a buy order after validation."""
+
+    async def _execute_trade(self, rec: dict, validation: dict, balance: float) -> bool:
+        """Execute a trade (BUY/SELL) after validation."""
         symbol = rec["symbol"]
+        action = rec["action"]
         print(f"Fetching quote for {symbol}...")
         quote = await self.market_data.get_quote(symbol)
         current_price = quote.price
 
-        size_pct = validation.get("new_size_pct", rec.get("size_pct", 0.05))
-        quantity = int((balance * size_pct) / current_price)
+        if action == "BUY":
+            size_pct = validation.get("new_size_pct", rec.get("size_pct", 0.05))
+            quantity = int((balance * size_pct) / current_price)
 
-        if quantity > 0:
-            if self.risk_manager.validate_trade(
-                "BUY", quantity, current_price, balance
-            ):
-                print(f"Executing BUY for {symbol}: {quantity} shares @ £{current_price:.2f}")
-                await self.broker.buy(symbol, quantity, current_price)
-                new_balance = await self.broker.get_account_balance()
-                await self.position_manager.update_position(
-                    symbol, quantity, current_price, "BUY", balance=new_balance
-                )
+            if quantity > 0:
+                current_positions = await self.broker.get_positions()
+                
+                # Check if we already have a position in this stock
+                existing_pos = next((p for p in current_positions if p["symbol"] == symbol), None)
+                current_pos_size = (existing_pos["quantity"] * current_price) if existing_pos else 0.0
+                
+                # If it's a new stock, count it as an additional position
+                num_positions = len(current_positions)
+                if not existing_pos:
+                    num_positions += 1
+
+                if self.risk_manager.validate_trade(
+                    action="BUY",
+                    quantity=quantity,
+                    price=current_price,
+                    total_portfolio_value=balance,
+                    current_position_size=current_pos_size,
+                    num_current_positions=num_positions
+                ):
+                    print(f"Executing BUY for {symbol}: {quantity} shares @ £{current_price:.2f}")
+                    await self.broker.buy(symbol, quantity, current_price)
+                    new_balance = await self.broker.get_account_balance()
+                    await self.position_manager.update_position(
+                        symbol, quantity, current_price, "BUY", balance=new_balance
+                    )
+                    return True
+                print(f"Risk Manager REJECTED buy for {symbol}: Potential position size/count limit exceeded.")
+                return False
+        
+        elif action == "SELL":
+            current_positions = await self.broker.get_positions()
+            existing_pos = next((p for p in current_positions if p["symbol"] == symbol), None)
+            
+            if not existing_pos:
+                print(f"Error: Cannot sell {symbol}, no position found.")
+                return False
+                
+            quantity = existing_pos["quantity"]
+            print(f"Executing SELL for {symbol}: {quantity} shares @ £{current_price:.2f}")
+            await self.broker.sell(symbol, quantity, current_price)
+            new_balance = await self.broker.get_account_balance()
+            await self.position_manager.update_position(
+                symbol, quantity, current_price, "SELL", balance=new_balance
+            )
+            return True
+
+        return False
+
+    def _select_top_technical_picks(self, prescreened_tickers: Dict[str, Dict[str, Any]], limit: int = 10) -> Dict[str, Dict[str, Any]]:
+        """Sort prescreened stocks by technical score and return top N."""
+        scored_stocks = []
+        for ticker, indicators in prescreened_tickers.items():
+            if indicators.get("passed", False):
+                score = self.prescreener.score_stock(indicators)
+                scored_stocks.append((ticker, score, indicators))
+        
+        # Sort by score descending
+        scored_stocks.sort(key=lambda x: x[1], reverse=True)
+        return {ticker: indicators for ticker, score, indicators in scored_stocks[:limit]}
 
     async def run_startup_analysis(self):
         """Run startup market analysis with remote validation.
@@ -230,18 +288,27 @@ class TradingWorkflow:
         passed_count = sum(1 for v in prescreened_tickers.values() if v.get("passed", False))
         print(f"Prescreened {passed_count} / {len(ftse100_tickers)} stocks")
 
-        # 5. Get targeted news for prescreened stocks
-        print("\nFetching news for prescreened stocks...")
-        filtered_news = await self._fetch_filtered_news(prescreened_tickers)
+        # 5. Sort and filter top 10 stocks based on technical score
+        print("\nSelecting top 10 stocks based on technical indicators...")
+        top_10_stocks = self._select_top_technical_picks(prescreened_tickers, limit=10)
+        
+        if top_10_stocks:
+            print(f"Selected: {', '.join(top_10_stocks.keys())}")
+        else:
+            print("No stocks passed technical prescreening.")
+
+        # 6. Get targeted news for top 10 stocks
+        print("\nFetching news for top 10 technical picks...")
+        filtered_news = await self._fetch_filtered_news(top_10_stocks)
 
         # Create filtered news summary
         news_summary = self._create_filtered_news_summary(
-            prescreened_tickers,
+            top_10_stocks,
             filtered_news
         )
 
-        # 6. Local AI Analysis on prescreened stocks with news
-        print("\nRunning AI Analysis on Prescreened Stocks with News...")
+        # 7. Local AI Analysis on top 10 stocks with news
+        print("\nRunning AI Analysis on Top 10 Technical Picks with News...")
 
         max_retries = self.settings.AI_MAX_RETRIES
         retry_delay = self.settings.AI_RETRY_DELAY_SECONDS
@@ -255,7 +322,7 @@ class TradingWorkflow:
                 analysis = await self.decision_engine.startup_analysis_with_prescreening(
                     portfolio_summary=portfolio_summary,
                     market_status=str(market_status),
-                    prescreened_tickers=prescreened_tickers,
+                    prescreened_tickers=top_10_stocks,
                     rss_news_summary=news_summary,
                     tools=self.tools
                 )
@@ -282,8 +349,35 @@ class TradingWorkflow:
 
         # 7. Execute Recommendations with Remote Validation
         recommendations = analysis.get("recommendations", [])
+        active_symbols = {p["symbol"] for p in positions}
+
         for rec in recommendations:
             try:
+                symbol = rec["symbol"]
+                action = rec["action"]
+
+                # Ignore HOLD or SELL recommendations for stocks we don't own
+                if action in ["HOLD", "SELL"] and symbol not in active_symbols:
+                    print(f"Ignoring {action} for {symbol} (not in active positions)")
+                    continue
+
+                # Ignore low confidence recommendations
+                if action in ["BUY", "SELL"] and rec["confidence"] < 0.8:
+                    print(f"Ignoring low-confidence {action} for {symbol} ({rec['confidence']})")
+                    continue
+
+                # Log local decision
+                local_decision_record = AIDecision(
+                    ai_type="local",
+                    symbol=symbol,
+                    context={"rec": rec},
+                    response=analysis,
+                    decision=action,
+                    confidence=rec["confidence"],
+                    requires_manual_review=self.settings.TRADING_MODE == "live"
+                )
+                await self.repo.log_decision(local_decision_record)
+
                 if rec["action"] in ["BUY", "SELL"]:
                     print(f"\nValidating {rec['action']} for {rec['symbol']} with Remote AI...")
 
@@ -299,15 +393,31 @@ class TradingWorkflow:
                     if validation["comments"]:
                         print(f"Comments: {validation['comments']}")
 
-                    if validation["decision"] == "PROCEED":
-                        await self._execute_buy(rec, validation, balance)
-                        await self.repo.mark_decision_executed(rec["symbol"])
-                    elif validation["decision"] == "MODIFY":
-                        modified_rec = rec.copy()
-                        modified_rec["confidence"] = validation.get("new_confidence", rec["confidence"])
-                        modified_rec["size_pct"] = validation.get("new_size_pct", rec.get("size_pct", 0.05))
-                        await self._execute_buy(modified_rec, validation, balance)
-                        await self.repo.mark_decision_executed(rec["symbol"])
+                    # Update decision with validation results
+                    await self.repo.update_decision_with_validation(
+                        symbol=rec["symbol"],
+                        remote_validation_decision=validation["decision"],
+                        remote_validation_comments=validation.get("comments", ""),
+                        requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED"
+                    )
+
+                    if validation["decision"] in ["PROCEED", "MODIFY"]:
+                        target_rec = rec
+                        if validation["decision"] == "MODIFY":
+                            target_rec = rec.copy()
+                            target_rec["confidence"] = validation.get("new_confidence", rec["confidence"])
+                            target_rec["size_pct"] = validation.get("new_size_pct", rec.get("size_pct", 0.05))
+
+                        if target_rec["confidence"] < 0.8:
+                            print(f"Validation rejection for {rec['symbol']}: Confidence {target_rec['confidence']} < 0.8")
+                            continue
+
+                        if market_status.is_open:
+                            success = await self._execute_trade(target_rec, validation, balance)
+                            if success:
+                                await self.repo.mark_decision_executed(rec["symbol"])
+                        else:
+                            print(f"Market CLOSED: Recommendation for {rec['symbol']} will be held as PLANNED.")
                     else:
                         print(f"REJECTED by Remote AI: {validation.get('comments', 'No reason provided')}")
 
@@ -351,6 +461,104 @@ class TradingWorkflow:
 
         return summary
 
+    async def _execute_pending_trades(self):
+        """Check for and execute any pending trade decisions."""
+        pending = await self.repo.get_pending_executions()
+        if not pending:
+            return
+
+        print(f"Found {len(pending)} pending trades to execute...")
+        balance = await self.broker.get_account_balance()
+
+        for decision in pending:
+            try:
+                # Reconstruct rec and validation from decision context
+                rec = decision.context.get("rec") if decision.context else None
+                if not rec:
+                    continue
+                
+                validation = {
+                    "decision": decision.remote_validation_decision,
+                    "comments": decision.remote_validation_comments,
+                }
+                
+                # Check if it was a MODIFY decision and apply changes
+                if decision.remote_validation_decision == "MODIFY":
+                    # In MODIFY cases, target_rec should have the modified values.
+                    pass
+
+                success = await self._execute_trade(rec, validation, balance)
+                if success:
+                    await self.repo.mark_decision_executed(decision.symbol)
+                    # Update balance for next iteration
+                    balance = await self.broker.get_account_balance()
+
+            except Exception as e:
+                print(f"Error executing pending trade for {decision.symbol}: {e}")
+
+    async def _perform_full_portfolio_revaluation(self):
+        """Perform deep analysis on all open positions using Local and Remote AI."""
+        positions = await self.repo.get_positions()
+        if not positions:
+            print("No active positions to revaluate.")
+            return
+
+        print(f"Revaluating {len(positions)} active positions...")
+        for position in positions:
+            try:
+                print(f"\n[Revaluation] Analyzing {position.stock.symbol}...")
+                
+                # 1. Fetch deep context
+                quote = await self.market_data.get_quote(position.stock.symbol)
+                history = await self.market_data.get_historical(position.stock.symbol, period="1mo")
+                history_str = "\n".join([f"{h.timestamp}: C={h.close} V={h.volume}" for h in history[-20:]])
+                
+                # Indicators for AI
+                indicators = {
+                    "rsi": 50, # Simple fallback if not calc
+                    "macd": 0,
+                    "sma_20": sum(h.close for h in history[-20:]) / 20
+                }
+                
+                # 2. Local AI Intraday Check
+                decision = await self.decision_engine.intraday_check(
+                    position=position,
+                    price_history=history_str,
+                    indicators=indicators,
+                    volume_data={"current": quote.volume, "average": sum(h.volume for h in history)/len(history)}
+                )
+                
+                # 3. Always escalate to Remote AI for hourly revaluation if any action suggested or for health check
+                print(f"Escalating {position.stock.symbol} to Remote AI for hourly validation...")
+                validation = await self.decision_engine.validate_with_remote_ai(
+                    action=decision["action"],
+                    symbol=position.stock.symbol,
+                    reasoning=f"Hourly Revaluation. Local AI suggests: {decision['action']}. Reasoning: {decision['reasoning']}",
+                    confidence=decision["confidence"],
+                    size_pct=0.0 # Not a new buy
+                )
+                
+                print(f"Remote AI Revaluation Decision: {validation['decision']} ({validation.get('comments', '')})")
+                
+                # 4. Act on remote decision
+                if validation["decision"] == "PROCEED" and decision["action"] == "SELL":
+                    print(f"Hourly Revaluation: Executing SELL for {position.stock.symbol}")
+                    await self._execute_trade(
+                        {"symbol": position.stock.symbol, "action": "SELL"},
+                        validation,
+                        0.0
+                    )
+                elif validation["decision"] == "MODIFY" and validation.get("new_action") == "SELL":
+                    print(f"Hourly Revaluation: Remote AI OVERRIDE to SELL for {position.stock.symbol}")
+                    await self._execute_trade(
+                        {"symbol": position.stock.symbol, "action": "SELL"},
+                        validation,
+                        0.0
+                    )
+                
+            except Exception as e:
+                print(f"Error during revaluation of {position.stock.symbol}: {e}")
+
     async def run_monitoring_loop(self):
         """Run monitoring loop for checking positions.
 
@@ -363,6 +571,19 @@ class TradingWorkflow:
 
         while True:
             try:
+                # 1. Check for pending executions (e.g. from closed market)
+                market_status = await self.market_data.get_market_status()
+                if market_status.is_open:
+                    await self._execute_pending_trades()
+
+                # 2. Check if it's time for hourly full portfolio revaluation
+                now = datetime.now()
+                if (now - self.last_full_portfolio_revaluation).total_seconds() >= 3600:
+                    print(f"[{now}] Starting hourly full portfolio revaluation...")
+                    await self._perform_full_portfolio_revaluation()
+                    self.last_full_portfolio_revaluation = now
+
+                # 3. Monitor existing positions (regular interval)
                 positions = await self.repo.get_positions()
 
                 for position in positions:
@@ -397,12 +618,38 @@ class TradingWorkflow:
                             volume_data=volume_data
                         )
 
+                        # Log decision
+                        final_action = decision["action"]
+                        if final_action == "SELL" and decision["confidence"] < 0.8:
+                            # Downgrade low-confidence SELL to HOLD for logging
+                            final_action = "HOLD"
+
+                        if final_action == "HOLD" and position.stock.symbol not in {p.stock.symbol for p in positions}:
+                            continue
+
+                        monitoring_decision = AIDecision(
+                            ai_type="local",
+                            symbol=position.stock.symbol,
+                            context={"position_id": position.id, "indicators": indicators},
+                            response=decision,
+                            decision=final_action,
+                            confidence=decision["confidence"],
+                            requires_manual_review=self.settings.TRADING_MODE == "live" and final_action == "SELL"
+                        )
+                        await self.repo.log_decision(monitoring_decision)
+
                         print(f"--- Decision for {position.stock.symbol} ---")
                         print(json.dumps(decision, indent=4))
                         print("-" * (18 + len(position.stock.symbol)))
 
                         if (decision["action"] == "SELL" and
-                                decision["confidence"] > 0.8):
+                                decision["confidence"] >= 0.8):
+                            # Check market status before selling
+                            market_status = await self.market_data.get_market_status()
+                            if not market_status.is_open:
+                                print(f"Market CLOSED: Delaying SELL for {position.stock.symbol}")
+                                continue
+
                             print("\nValidating SELL with Remote AI...")
                             validation = await self.decision_engine.validate_with_remote_ai(
                                 action="SELL",
@@ -413,15 +660,31 @@ class TradingWorkflow:
                             )
 
                             print(f"Remote AI Validation: {validation['decision']}")
-                            if validation["decision"] == "PROCEED":
-                                await self.broker.sell(
-                                    position.stock.symbol, position.quantity, quote.price
-                                )
-                                new_balance = await self.broker.get_account_balance()
-                                await self.position_manager.update_position(
-                                    position.stock.symbol, position.quantity, quote.price,
-                                    "SELL", balance=new_balance
-                                )
+
+                            # Update decision with validation results
+                            await self.repo.update_decision_with_validation(
+                                symbol=position.stock.symbol,
+                                remote_validation_decision=validation["decision"],
+                                remote_validation_comments=validation.get("comments", ""),
+                                requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED"
+                            )
+
+                            if validation["decision"] in ["PROCEED", "MODIFY"]:
+                                final_confidence = validation.get("new_confidence", decision["confidence"])
+                                if final_confidence < 0.8:
+                                    print(f"SELL aborted for {position.stock.symbol}: Validation confidence {final_confidence} < 0.8")
+                                    continue
+
+                                # Reconstruct rec for _execute_trade
+                                sell_rec = {
+                                    "symbol": position.stock.symbol,
+                                    "action": "SELL",
+                                    "confidence": final_confidence,
+                                    "reasoning": decision["reasoning"]
+                                }
+                                success = await self._execute_trade(sell_rec, validation, balance=0.0)
+                                if success:
+                                    await self.repo.mark_decision_executed(position.stock.symbol)
                             else:
                                 print(f"SELL REJECTED: {validation.get('comments', 'No reason')}")
                         await asyncio.sleep(2)

@@ -166,15 +166,52 @@ class StockPrescreener:
         current_price: float
     ) -> bool:
         """Evaluate if stock passes prescreening criteria."""
+        # MUST NOT be overbought (RSI > 70)
+        if rsi >= 70:
+            return False
+
         criteria_met = 0
 
-        if rsi < 70:
+        # Optional bullish criteria (must meet at least 2)
+        if rsi < 30: # Oversold / Value opportunity
             criteria_met += 1
 
-        if current_price > sma_50:
+        if current_price > sma_50: # Uptrend
             criteria_met += 1
 
-        if macd > 0:
+        if macd > 0: # Momentum
             criteria_met += 1
 
         return criteria_met >= 2
+
+    def score_stock(self, indicators: Dict[str, Any]) -> float:
+        """
+        Calculate a technical score for sorting.
+        Higher is better.
+        """
+        score = 0.0
+        
+        rsi = indicators.get("rsi", 50.0)
+        macd = indicators.get("macd", 0.0)
+        current_price = indicators.get("current_price", 0.0)
+        sma_50 = indicators.get("sma_50", 0.0)
+        
+        # 1. RSI Score: Prefer lower RSI (oversold) but not overbought
+        if rsi < 30:
+            score += 40  # Very bullish (oversold)
+        elif rsi < 50:
+            score += 20  # Neutral-Bullish
+        elif rsi < 70:
+            score += 5   # Neutral-Bearish
+        else:
+            score -= 100 # Overbought
+            
+        # 2. MACD Score: Positive MACD is bullish
+        if macd > 0:
+            score += 30
+            
+        # 3. Trend Score: Price above SMA 50
+        if current_price > sma_50:
+            score += 30
+            
+        return score

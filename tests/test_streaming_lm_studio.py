@@ -2,8 +2,15 @@
 
 import asyncio
 import pytest
+import os
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionToolParam
+
+# Skip by default unless RUN_AI_TESTS is set
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_AI_TESTS") != "true",
+    reason="AI integration tests disabled by default"
+)
 
 
 @pytest.mark.asyncio
@@ -22,7 +29,7 @@ async def test_streaming():
     # Test 1: Simple text streaming
     print("\n1. Testing simple text streaming...")
     stream = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
+        model='mistralai/ministral-3-14b-reasoning',
         messages=[{'role': 'user', 'content': 'Count from 1 to 10'}],
         stream=True
     )
@@ -40,7 +47,7 @@ async def test_streaming():
     # Test 2: JSON response streaming
     print("\n2. Testing JSON response streaming...")
     stream = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
+        model='mistralai/ministral-3-14b-reasoning',
         messages=[{
             'role': 'system',
             'content': 'You are a helpful assistant. Respond in valid JSON format.'
@@ -76,7 +83,7 @@ async def test_streaming():
     }]
 
     stream = await client.chat.completions.create(
-        model='zai-org/GLM-4.6V-Flash',
+        model='mistralai/ministral-3-14b-reasoning',
         messages=[{'role': 'user', 'content': 'What time is it?'}],
         tools=tools,
         stream=True

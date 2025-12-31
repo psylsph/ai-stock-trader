@@ -35,16 +35,23 @@ Market Context:
 Task: Analyze the current market conditions and provide trading recommendations.
 You have internet access - search for relevant news, sentiment, and financial data for LSE stocks (FTSE 100/250).
 
-For each recommendation, provide:
-1. Action (BUY/SELL/HOLD)
-2. Symbol (e.g., LLOY.L)
-3. Reasoning (cite news/data)
-4. Confidence (0.0-1.0)
-5. Suggested position size (percentage of portfolio, max 20%)
+CRITICAL OUTPUT INSTRUCTIONS:
+1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
+2. The "analysis_summary" field should provide high-level market context ONLY. 
+3. DO NOT put actionable recommendations inside "analysis_summary".
+4. If there are no stocks to recommend, return an empty list for "recommendations".
+5. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+
+For each recommendation object in the list, include:
+1. "action": (BUY/SELL/HOLD)
+2. "symbol": (e.g., LLOY.L)
+3. "reasoning": (cite news/data)
+4. "confidence": (0.0-1.0)
+5. "size_pct": (percentage of portfolio, max 20% / 0.20)
 
 Return your response in strict JSON format:
 {{
-    "analysis_summary": "...",
+    "analysis_summary": "High level market overview...",
     "recommendations": [
         {{
             "action": "BUY",

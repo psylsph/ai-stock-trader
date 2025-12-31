@@ -131,21 +131,28 @@ class PositionManager:
             print(f"Error saving portfolio JSON: {e}")
 
 class RiskManager:
-    def __init__(self, max_position_pct: float = 0.20):
+    def __init__(self, max_position_pct: float = 0.20, max_positions: int = 5):
         self.max_position_pct = max_position_pct
+        self.max_positions = max_positions
 
     def validate_trade(self,
                       action: str,
                       quantity: float,
                       price: float,
                       total_portfolio_value: float,
-                      current_position_size: float = 0.0) -> bool:
+                      current_position_size: float = 0.0,
+                      num_current_positions: int = 0) -> bool:
         """
         Validate if trade meets risk requirements.
         """
         trade_value = quantity * price
 
         if action == "BUY":
+            # Check max number of positions (only if it's a new position)
+            # The caller should pass the number of positions INCLUDING the one being validated if it's new.
+            if num_current_positions > self.max_positions:
+                return False
+
             # Check max position size
             projected_size = current_position_size + trade_value
             if projected_size > (total_portfolio_value * self.max_position_pct):

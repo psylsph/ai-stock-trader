@@ -9,7 +9,7 @@ Before completing any work, you MUST:
 2. Run mypy for type checking
 3. Run ALL tests (not just a subset)
 4. Fix any failures before reporting completion
-5. Update the DESIGN.md to match any design changes, the user MUST be asked if the design is to be updated.
+5. Update the DESIGN.md to match any design changes (ask user first)
 
 ```bash
 # Run linter
@@ -32,15 +32,11 @@ pytest
 # Run single test
 pytest tests/test_database.py::test_create_stock
 
-# Run with verbose output
-pytest -v
-
 # Run specific test file
 pytest tests/test_database.py
-pytest tests/test_trading.py
 
-# Run with coverage (if coverage.py is installed)
-pytest --cov=src --cov-report=html
+# Run with coverage
+pytest --cov=src --cov-report=term-missing
 ```
 
 ### Running the Application
@@ -51,9 +47,8 @@ python -m src.main
 # Run with database reset
 python -m src.main --restart
 
-# Run verification scripts
-python verify_av.py    # Verify Alpha Vantage connection
-python verify_news.py  # Verify news fetching
+# Start with web dashboard
+python -m src.main --web
 ```
 
 ## Code Style Guidelines
@@ -61,74 +56,44 @@ python verify_news.py  # Verify news fetching
 ### Imports
 - Order: standard library → third-party → local imports
 - Group imports with blank lines between groups
-- Use `from typing import ...` for type hints
-- Prefer absolute imports over relative imports
+- Use absolute imports (e.g., `from src.config.settings import settings`)
 
-```python
-# Correct order
-import asyncio
-import logging
-from datetime import datetime
-from typing import Dict, Any, Optional
-
-import aiohttp
-from sqlalchemy import select
-
-from src.config import settings
-from src.database.models import Stock
-```
-
-### Type Hints
+### Type Hints & Naming
 - Required for all function signatures
-- Use `Optional[T]` instead of `T | None` for compatibility
-- Use `Dict[str, Any]`, `List[T]` instead of `dict[str, any]`
-- Specify return types explicitly
+- Use `Optional[T]` instead of `T | None`
+- Use `Dict[str, Any]`, `List[T]` for collections
+- Classes: `PascalCase`, Functions/Variables: `snake_case`, Constants: `UPPER_SNAKE_CASE`
 
 ```python
 async def analyze_position(
     symbol: str,
-    entry_price: float,
+    price: float,
     indicators: Dict[str, Any]
 ) -> Dict[str, Any]:
     ...
 ```
 
-### Naming Conventions
-- Classes: `PascalCase` (e.g., `TradingDecisionEngine`, `MarketDataFetcher`)
-- Functions/variables: `snake_case` (e.g., `get_positions`, `current_price`)
-- Constants: `UPPER_SNAKE_CASE` (e.g., `MAX_POSITION_PCT`)
-- Private members: `_leading_underscore`
-- Database models: `PascalCase` but tables use `snake_case`
-
 ### Async Patterns
 - All database operations and external API calls must be async
-- Use `async def` for all async functions
-- Use `async with` for context managers (database sessions, HTTP clients)
-- Return types should specify the type, not just `Coroutine`
-
-```python
-async def get_quote(self, symbol: str) -> Quote:
-    async with aiohttp.ClientSession() as session:
-        ...
-```
+- Use `async with` for context managers (sessions, HTTP clients)
+- Use `asyncio.gather()` for parallel independent tasks
 
 ### Error Handling
-- Use specific exceptions where possible (`ValueError`, `KeyError`)
-- For broad exception handling in production code, use `# pylint: disable=broad-except`
-- Log errors with `exc_info=True` for debugging
-- Provide fallback responses for external AI failures
+- Use specific exceptions where possible
+- For broad exceptions, use `# pylint: disable=broad-except`
+- Log errors with `exc_info=True`
+- Provide fallback responses for AI failures
 
 ```python
 try:
     response = await self.api_call()
 except Exception as e:  # pylint: disable=broad-except
-    logger.error("API call failed", exc_info=True)
+    logger.error("API call failed: %s", e, exc_info=True)
     return {"decision": "HOLD", "confidence": 0.0}
 ```
 
 ### Database (SQLAlchemy 2.0+)
-- Use `Mapped[T]` type hints for columns
-- Use `mapped_column()` instead of `Column()`
+- Use `Mapped[T]` and `mapped_column()`
 - Use async session maker pattern
 - Always use `select()` with `execute()`
 
@@ -139,67 +104,39 @@ class Stock(Base):
     symbol: Mapped[str] = mapped_column(String, unique=True, index=True)
 ```
 
-### Pydantic/Configuration
-- Use `pydantic-settings.BaseSettings` for configuration
-- Use `model_config = SettingsConfigDict(...)` for settings config
-- Mark optional fields with `Optional[T]`
-- Default values can be provided directly
+### Pydantic & Configuration
+- Use `pydantic-settings.BaseSettings`
+- Define `model_config = SettingsConfigDict(env_file=".env", extra="ignore")`
 
-### Documentation
-- Docstrings with `"""triple quotes"""` for all public classes and methods
-- Describe parameters and return values
-- Keep descriptions concise but informative
-
-```python
-async def analyze_position(self, symbol: str, price: float) -> Dict[str, Any]:
-    """
-    Analyze a trading position using AI.
-
-    Args:
-        symbol: The stock symbol to analyze.
-        price: Current market price.
-
-    Returns:
-        Dictionary containing decision, reasoning, and confidence score.
-    """
-```
+### Documentation & Comments
+- Docstrings with `"""triple quotes"""` for all public members
+- Describe params and return values
+- Keep comments minimal; use `# TODO:` for future work
+- Comment complex business logic only
 
 ### Testing
-- Use `@pytest.mark.asyncio` for async test functions
-- Use `@pytest_asyncio.fixture` for async fixtures
-- Mock external dependencies (ollama, openrouter, APIs)
-- Use `AsyncMock` for mocking async methods
-- Use in-memory SQLite for database tests (`sqlite+aiosqlite:///:memory:`)
-
-```python
-@pytest.mark.asyncio
-async def test_paper_buy():
-    repo = MockRepo()
-    fetcher = MockFetcher()
-    trader = PaperTrader(repo, fetcher, initial_balance=1000.0)
-    ...
-```
+- Use `@pytest.mark.asyncio` and `@pytest_asyncio.fixture`
+- Mock external dependencies (AI APIs, Market Data)
+- Use in-memory SQLite for database tests: `sqlite+aiosqlite:///:memory:`
 
 ### Project Structure
-- `src/ai/`: AI clients and decision engine
-- `src/database/`: Models and repository pattern
-- `src/market/`: Data fetchers and news
-- `src/trading/`: Paper trader, position/risk managers
-- `src/orchestration/`: Workflows and agents
+- `src/ai/`: AI clients (Local, OpenRouter) and decision engine
+- `src/config/`: Application settings and web mode configuration
+- `src/database/`: SQLAlchemy models, repository pattern, and migrations
+- `src/market/`: Data fetchers (Market prices, news, charts)
+- `src/trading/`: Paper trader, position/risk managers, and pre-screening
+- `src/orchestration/`: Workflow logic and agent coordination
+- `src/web/`: FastAPI dashboard, templates, and web-specific logic
+- `tests/`: Pytest suite covering unit and integration tests
 
-### Linting (if added in future)
-- If black is configured: format with `black src/`
-- If ruff is configured: lint with `ruff check src/`
-- If mypy is configured: type check with `mypy src/`
+### Trading Specifics
+- **LSE Symbol format:** Always use `.L` suffix (e.g., `LLOY.L`, `TSCO.L`)
+- **Market hours:** 08:00 - 16:30 GMT (Monday - Friday)
+- **Currency:** Project uses GBP. Convert pence (GBp) to pounds: `price / 100`
+- **Manual Review:** In 'Live' mode, trades require validation via `remote_validation_decision` in the database.
 
-### Common Patterns
-- Use `datetime.utcnow()` for database timestamps
-- Use LSE symbol format: `SYMBOL.L` (e.g., `LLOY.L`)
-- Market hours: 8:00 AM - 4:30 PM GMT
-- All currency values in GBP (convert GBp to GBP when needed)
-
-### Comments
-- Use `# TODO:` for future work items
-- Keep comments minimal, let code be self-documenting
-- Comment complex business logic only
-- Use `# pylint: disable=...` for justified lint exceptions
+### Interaction Guidelines
+- Be concise and direct in CLI outputs.
+- Explain any commands that modify the filesystem or system state.
+- Always verify changes with the project-specific build/test/lint commands.
+- Do not make assumptions about library availability; check `requirements.txt`.

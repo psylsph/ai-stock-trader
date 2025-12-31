@@ -1,7 +1,7 @@
 # AI Stock Trader - Architecture Design
 
-**Version:** 1.0.0  
-**Last Updated:** 2025-12-31  
+**Version:** 1.0.1  
+**Last Updated:** 2026-01-01  
 **Status:** Production-Ready  
 **Target Market:** London Stock Exchange (LSE) / FTSE 100
 
@@ -159,6 +159,9 @@ Filters the FTSE 100 universe down to a manageable set of high-probability setup
 ### 5.2 AI Layer
 - **Tool Calling**: The AI has access to `get_ticker_news`, `get_price_history`, and `get_current_quote`.
 - **Vision Integration**: The bot generates local charts using `matplotlib`, converts them to Base64, and sends them to the local AI for visual pattern recognition.
+- **Robust Response Parsing**:
+    - Implements `_clean_json_response` to strip internal AI reasoning (e.g., `[THINK]` blocks) and extract valid JSON objects from verbose outputs.
+    - Uses strict prompt instructions to ensure actionable recommendations are placed in a structured `recommendations` list rather than buried in summaries.
 - **Retry Mechanism**: Implements exponential backoff (1s, 2s, 3s) for AI API calls to handle transient network issues.
 
 ### 5.3 Database Schema (SQLite)

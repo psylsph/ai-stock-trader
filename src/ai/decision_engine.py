@@ -181,9 +181,9 @@ class TradingDecisionEngine:
             rss_news_summary: News data for prescreened stocks only
         """
         prompt = f"""
-You are analyzing a pre-filtered set of FTSE 100 stocks.
+You are analyzing the TOP 10 technically strongest FTSE 100 stocks based on pre-filtering.
 
-Prescreened Stocks ({len(prescreened_tickers)} stocks):
+Technical Leaders ({len(prescreened_tickers)} stocks):
 {', '.join(prescreened_tickers.keys())}
 
 Indicator Results:
@@ -207,12 +207,22 @@ Portfolio Status:
 Market Status:
 {market_status}
 
+News Summary for Prescreened Stocks:
+{rss_news_summary}
+
 Task: Analyze the prescreened stocks with their news data and provide trading recommendations.
 Consider each stock's technical setup and sentiment from their news.
 
+CRITICAL OUTPUT INSTRUCTIONS:
+1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
+2. The "analysis_summary" field should provide high-level market context ONLY.
+3. DO NOT put actionable recommendations inside "analysis_summary".
+4. If there are no stocks to recommend, return an empty list for "recommendations".
+5. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+
 Return your response in strict JSON format:
 {{
-    "analysis_summary": "...",
+    "analysis_summary": "High level market overview...",
     "recommendations": [
         {{
             "action": "BUY"|"SELL"|"HOLD",
@@ -241,8 +251,22 @@ Return your response in strict JSON format:
             print_tokens=True
         )
 
+        # Helper to clean AI output
+        def clean_json_response(text: str) -> str:
+            # Remove [THINK] blocks
+            import re
+            text = re.sub(r'\[THINK\].*?\[/THINK\]', '', text, flags=re.DOTALL)
+            # Find the first { and last }
+            start = text.find('{')
+            end = text.rfind('}')
+            if start != -1 and end != -1:
+                return text[start:end+1]
+            return text
+
+        cleaned_content = clean_json_response(full_content)
+
         try:
-            return json.loads(full_content)
+            return json.loads(cleaned_content)
         except json.JSONDecodeError:
             return {
                 "analysis_summary": full_content,
