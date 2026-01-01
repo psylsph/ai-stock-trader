@@ -29,7 +29,7 @@ async def test_streaming():
     # Test 1: Simple text streaming
     print("\n1. Testing simple text streaming...")
     stream = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{'role': 'user', 'content': 'Count from 1 to 10'}],
         stream=True
     )
@@ -47,7 +47,7 @@ async def test_streaming():
     # Test 2: JSON response streaming
     print("\n2. Testing JSON response streaming...")
     stream = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{
             'role': 'system',
             'content': 'You are a helpful assistant. Respond in valid JSON format.'
@@ -83,7 +83,7 @@ async def test_streaming():
     }]
 
     stream = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{'role': 'user', 'content': 'What time is it?'}],
         tools=tools,
         stream=True

@@ -16,5 +16,6 @@ logs/
 .venv
 portfolio.json
 trading.db
+.coverage
 .pytest_cache
 .mypy_cache/

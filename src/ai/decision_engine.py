@@ -271,21 +271,11 @@ CRITICAL OUTPUT INSTRUCTIONS:
 1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
 2. The "analysis_summary" field should provide high-level market context ONLY.
 3. DO NOT put actionable recommendations inside "analysis_summary".
-4. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+4. Return ONLY the raw JSON object. No markdown formatting (```json), no [THINK] blocks, no explanations outside JSON.
+5. Begin with {{ and end with }} - no preamble, no postamble.
 
 Return your response in strict JSON format:
-{{
-    "analysis_summary": "High level market overview...",
-    "recommendations": [
-        {{
-            "action": "BUY"|"SELL"|"HOLD",
-            "symbol": "...",
-            "reasoning": "...",
-            "confidence": 0.85,
-            "size_pct": 0.1
-        }}
-    ]
-}}
+{{"analysis_summary": "High level market overview...", "recommendations": [{{"action": "BUY"|"SELL"|"HOLD", "symbol": "...", "reasoning": "...", "confidence": 0.85, "size_pct": 0.1}}]}}
 """
 
         try:

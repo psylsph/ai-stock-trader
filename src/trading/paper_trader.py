@@ -5,6 +5,9 @@ from pydantic import BaseModel
 from src.database.repository import DatabaseRepository
 from src.database.models import Trade
 from src.market.data_fetcher import MarketDataFetcher
+import json
+import os
+
 
 class Order(BaseModel):
     id: str
@@ -33,14 +36,45 @@ class PaperTrader(Broker):
         self.repo = repo
         self.market_data = market_data
         self.initial_balance = initial_balance
-        # Note: In a real app, balance needs to be persisted in DB.
-        # For simplicity, we'll assume balance is calculated from trades or stored in a User model (not yet created).
-        # We will track cash in a simple variable for this session, but in reality it should be in DB.
-        self._current_balance = initial_balance
+
+        # Load balance from portfolio.json if it exists
+        portfolio_file = os.getenv("PORTFOLIO_FILE", "portfolio.json")
+        saved_balance = None
+        if os.path.exists(portfolio_file):
+            try:
+                with open(portfolio_file, 'r') as f:
+                    data = json.load(f)
+                    saved_balance = data.get("cash_balance")
+                    # Validate that the saved balance is reasonable (not 0 when it shouldn't be)
+                    if saved_balance is not None and saved_balance > 0:
+                        self._current_balance = saved_balance
+                    else:
+                        self._current_balance = initial_balance
+            except (json.JSONDecodeError, IOError):
+                self._current_balance = initial_balance
+        else:
+            self._current_balance = initial_balance
 
     async def get_account_balance(self) -> float:
-        # TODO: Retrieve from DB to be persistent
         return self._current_balance
+
+    def update_balance(self, amount: float):
+        """Update balance and save to portfolio.json"""
+        self._current_balance = amount
+
+        # Save to portfolio.json for persistence
+        portfolio_file = os.getenv("PORTFOLIO_FILE", "portfolio.json")
+        try:
+            data = {}
+            if os.path.exists(portfolio_file):
+                with open(portfolio_file, 'r') as f:
+                    data = json.load(f)
+            data["cash_balance"] = self._current_balance
+            data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            with open(portfolio_file, 'w') as f:
+                json.dump(data, f, indent=4)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[WARNING] Failed to save portfolio file: {e}")
 
     async def get_positions(self) -> List[Dict[str, Any]]:
         db_positions = await self.repo.get_positions()
@@ -57,6 +91,7 @@ class PaperTrader(Broker):
             raise ValueError(f"Insufficient funds: {cost} > {self._current_balance}")
 
         self._current_balance -= cost
+        self.update_balance(self._current_balance)
 
         # Update DB
         stock = await self.repo.get_or_create_stock(symbol, symbol) # Name fallback
@@ -89,6 +124,7 @@ class PaperTrader(Broker):
     async def sell(self, symbol: str, quantity: float, price: float) -> Order:
         revenue = quantity * price
         self._current_balance += revenue
+        self.update_balance(self._current_balance)
 
         stock = await self.repo.get_or_create_stock(symbol, symbol)
 

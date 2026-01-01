@@ -123,12 +123,18 @@ class LocalAIClient:
     def _clean_json_response(self, text: str) -> str:
         """Clean AI output to extract valid JSON."""
         import re
+        # Remove code block markers (```json, ```)
+        text = re.sub(r'```[a-zA-Z]*\n?', '', text)
+        text = re.sub(r'```', '', text)
         # Remove [THINK] blocks
         text = re.sub(r'\[THINK\].*?\[/THINK\]', '', text, flags=re.DOTALL)
+        # Remove any markdown-style explanations before/after JSON
+        text = re.sub(r'^[^{]*', '', text)
+        text = re.sub(r'[^}]*$', '', text)
         # Find the first { and last }
         start = text.find('{')
         end = text.rfind('}')
-        if start != -1 and end != -1:
+        if start != -1 and end != -1 and end > start:
             return text[start:end+1]
         return text
 
@@ -149,7 +155,8 @@ CRITICAL OUTPUT INSTRUCTIONS:
 2. The "analysis_summary" field should provide high-level market context ONLY.
 3. DO NOT put actionable recommendations inside "analysis_summary".
 4. If there are no stocks to recommend, return an empty list for "recommendations".
-5. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+5. Return ONLY the raw JSON object. No markdown formatting (```json), no [THINK] blocks, no explanations outside JSON.
+6. Begin with { and end with } - no preamble, no postamble.
 
 Return your response in strict JSON format:
 {

@@ -37,10 +37,11 @@ You have internet access - search for relevant news, sentiment, and financial da
 
 CRITICAL OUTPUT INSTRUCTIONS:
 1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
-2. The "analysis_summary" field should provide high-level market context ONLY. 
+2. The "analysis_summary" field should provide high-level market context ONLY.
 3. DO NOT put actionable recommendations inside "analysis_summary".
 4. If there are no stocks to recommend, return an empty list for "recommendations".
-5. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+5. Return ONLY the raw JSON object. No markdown formatting (```json), no [THINK] blocks, no explanations outside JSON.
+6. Begin with { and end with } - no preamble, no postamble.
 
 For each recommendation object in the list, include:
 1. "action": (BUY/SELL/HOLD)

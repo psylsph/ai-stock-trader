@@ -1,7 +1,9 @@
 """Tests for paper trading functionality."""
 
+import os
 from unittest.mock import AsyncMock
 import pytest
+import tempfile
 from src.trading.paper_trader import PaperTrader
 from src.market.data_fetcher import MarketDataFetcher
 from src.database.repository import DatabaseRepository
@@ -29,6 +31,31 @@ class MockFetcher(MarketDataFetcher):
     async def get_market_status(self):
         """Mock get_market_status method."""
 
+
+@pytest.fixture(autouse=True)
+def clean_portfolio_file():
+    """Clean up portfolio.json before and after each test."""
+    portfolio_file = "portfolio.json"
+    # Save original if exists
+    original_exists = os.path.exists(portfolio_file)
+    original_content = None
+    if original_exists:
+        with open(portfolio_file, 'r') as f:
+            original_content = f.read()
+        os.remove(portfolio_file)
+    
+    yield
+    
+    # Cleanup after test
+    if os.path.exists(portfolio_file):
+        os.remove(portfolio_file)
+    
+    # Restore original if it existed
+    if original_exists and original_content:
+        with open(portfolio_file, 'w') as f:
+            f.write(original_content)
+
+
 @pytest.mark.asyncio
 async def test_paper_buy():
     """Test paper trading buy order execution."""
@@ -43,9 +70,10 @@ async def test_paper_buy():
     assert order.action == "BUY"
     assert order.quantity == 10
     assert order.price == 50.0
-    assert trader._current_balance == 500.0 # 1000 - (10*50)
+    assert trader._current_balance == 500.0  # 1000 - (10*50)
 
     repo.log_trade.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_paper_buy_insufficient_funds():
@@ -55,4 +83,4 @@ async def test_paper_buy_insufficient_funds():
     trader = PaperTrader(repo, fetcher, initial_balance=100.0)
 
     with pytest.raises(ValueError):
-        await trader.buy("TEST", 10, 50.0) # Cost 500 > 100
+        await trader.buy("TEST", 10, 50.0)  # Cost 500 > 100

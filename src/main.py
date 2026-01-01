@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import argparse
+import os
 import uvicorn
 from src.config.settings import settings
 from src.database import init_db
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def main():
     """Main function to run the AI Stock Trader bot."""
     parser = argparse.ArgumentParser(description="AI Stock Trader Bot")
-    parser.add_argument("--restart", action="store_true", help="Reset the database before starting")
+    parser.add_argument("--restart", action="store_true", help="Reset the database and remove portfolio.json before starting")
     parser.add_argument("--web", action="store_true", help="Start web server for monitoring and control")
     parser.add_argument("--test-mode", action="store_true", help="Ignore market hours for testing buy/sell logic")
     args = parser.parse_args()
@@ -33,7 +34,16 @@ async def main():
 
     # Initialize Database
     if args.restart:
-        logger.info("RESTART FLAG DETECTED: Resetting database...")
+        logger.info("RESTART FLAG DETECTED: Resetting database and removing portfolio.json...")
+
+        # Remove portfolio.json if it exists
+        portfolio_file = os.getenv("PORTFOLIO_FILE", "portfolio.json")
+        if os.path.exists(portfolio_file):
+            try:
+                os.remove(portfolio_file)
+                logger.info("Removed %s", portfolio_file)
+            except OSError as e:
+                logger.warning("Failed to remove %s: %s", portfolio_file, e)
 
     logger.info("Initializing database at %s", settings.DATABASE_URL)
     repo = await init_db(settings.DATABASE_URL, reset=args.restart)

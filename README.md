@@ -6,17 +6,18 @@ An advanced AI-powered stock trading bot designed for the **London Stock Exchang
 
 - **Dual AI Architecture**:
   - **Remote AI (OpenRouter/Grok-4)**: Performs deep market analysis, research, and high-level strategy using real-time internet access.
-  - **Local AI (Ollama/Llama 3.2)**: Efficiently monitors open positions and price action intraday without incurring API costs.
+  - **Local AI (LM Studio)**: Efficiently monitors open positions and price action intraday without incurring API costs.
 - **Real-Time News Integration**: Fetches and analyzes RSS feeds from **Financial Times** and **Money.com** to inform trading decisions.
 - **LSE Optimized**: Built directly for UK stocks (e.g., `LLOY.L`, `BP.L`) with appropriate market hour awareness.
 - **Alpha Vantage Integration**: Uses Alpha Vantage API for reliable daily and intraday market data.
 - **Paper Trading Engine**: built-in simulator to test strategies risk-free with a virtual portfolio.
 - **Risk Management**: Automated position sizing and risk checks (max position size, stop losses).
+- **Configurable Prescreening**: Adjust how many stocks pass from technical screening to AI analysis.
 
 ## Prerequisites
 
 - **Python 3.10+**
-- **Ollama**: Installed locally with `llama3.2:3b` model pulld (`ollama pull llama3.2:3b`).
+- **LM Studio**: Running locally with a model loaded (e.g., `mistralai/ministral-3-14b-reasoning`).
 - **Alpha Vantage API Key**: (Free tier available).
 - **OpenRouter API Key**: For remote AI access.
 
@@ -42,13 +43,19 @@ An advanced AI-powered stock trading bot designed for the **London Stock Exchang
    cp .env.example .env
    ```
 
-   **Edit `.env`:**
+    **Edit `.env`:**
 
-   ```bash
-   OPENROUTER_API_KEY=your_key_here
-   ```
+    ```bash
+    OPENROUTER_API_KEY=your_key_here
+    MAX_PRESCREENED_STOCKS=10  # Number of stocks to pass from prescreening to AI analysis
+    ```
 
-## Usage
+## Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INITIAL_BALANCE` | 1000 | Starting balance for paper trading |
+| `MAX_PRESCREENED_STOCKS` | 10 | Number of top technical stocks to pass from prescreening to AI analysis |
 
 ### Run the Bot
 

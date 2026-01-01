@@ -37,7 +37,7 @@ async def test_lm_studio():
     # Test 1: Simple chat
     print("\n1. Testing simple chat...")
     response = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{'role': 'user', 'content': 'DO NOT THINK. Respond with just the word TEST.'}]
     )
     content = response.choices[0].message.content
@@ -54,7 +54,7 @@ async def test_lm_studio():
     # Test 2: JSON response
     print("\n2. Testing JSON response...")
     response = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{
             'role': 'system',
             'content': 'You are a helpful assistant. Respond in JSON format.'
@@ -95,7 +95,7 @@ async def test_lm_studio():
     }]
 
     response = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{'role': 'user', 'content': 'DO NOT THINK. What time is it?'}],
         tools=tools
     )
@@ -118,7 +118,7 @@ async def test_lm_studio():
     img_base64 = base64.b64encode(img_bytes.read()).decode('utf-8')
 
     response = await client.chat.completions.create(
-        model='mistralai/ministral-3-14b-reasoning',
+        model='mistralai/ministral-3-3b',
         messages=[{
             'role': 'user',
             'content': [

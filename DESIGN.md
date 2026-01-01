@@ -60,10 +60,12 @@ When the bot starts (either `--web` or bot mode), it **ALWAYS** performs a compr
 
 ### Key Behaviors:
 - **Analysis runs ALWAYS**: Both web mode (`--web`) and bot mode execute startup analysis
-- **Remote validation ALWAYS happens**: Remote AI validation is NOT optional - it checks every BUY and SELL recommendation
+- **Rule-based validation**: Validation uses deterministic rules instead of remote AI calls for consistency
 - **BUY once per day rule**: Each symbol can only be bought once per calendar day to prevent over-trading
 - **Remote AI fallback**: If local AI returns no BUY recommendations, the system queries remote AI for additional opportunities
-- **Paper mode**: Trades execute automatically after validation
+- **Remote Only Mode**: Can skip local AI entirely when `REMOTE_ONLY_MODE=true`
+- **Temperature settings**: Configurable `LOCAL_AI_TEMPERATURE` and `REMOTE_AI_TEMPERATURE` (default 0.2) for deterministic outputs
+- **Paper mode**: Trades execute automatically after rule-based validation
 - **Live mode**: Manual review flag is set but trades don't auto-execute (require user approval)
 - **Web mode**: Web server starts after analysis for manual review
 - **Bot mode**: Monitoring loop runs after analysis
@@ -94,8 +96,8 @@ sequenceDiagram
 
     loop For Each Recommendation
         alt rec["action"] in ["BUY", "SELL"] and rec["confidence"] > 0.8
-            Bot->>RAI: Validate Trade Decision (ALWAYS done)
-            RAI-->>Bot: PROCEED / MODIFY / REJECT
+            Bot->>Rules: Apply Validation Rules
+            Rules-->>Bot: PROCEED / MODIFY / REJECT
         alt PROCEED
             alt Paper Mode
                 alt Buy Action
@@ -134,17 +136,16 @@ flowchart TD
     LocalCheck --> Decision{Action?}
     Decision -->|HOLD| Next[Next Position]
     Decision -->|SELL| Conf{Confidence > 80%?}
-    Conf -->|No| Escalate[Escalate to Remote AI]
+    Conf -->|No| Rules[Apply Validation Rules]
     Conf -->|Yes| ExecSell[Execute SELL Order]
-    Escalate --> Validate[Remote AI Validation]
-    Validate -->|Confirmed| ExecSell
-    Validate -->|Rejected| Next
+    Rules -->|PROCEED| ExecSell
+    Rules -->|REJECT| Next
     ExecSell --> Log[Update DB & Log Trade]
     Log --> Next
     Next --> End([End Loop])
 ```
 
-**Hourly Revaluation**: Every hour, the bot performs a deep analysis of all open positions, fetching comprehensive historical data and escalating to Remote AI for validation, regardless of local AI confidence.
+**Hourly Revaluation**: Every hour, the bot performs a deep analysis of all open positions, fetching comprehensive historical data and applying rule-based validation, regardless of local AI confidence.
 
 ## 4. Web Dashboard & API
 
@@ -171,7 +172,7 @@ Filters the FTSE 100 universe down to a manageable set of high-probability setup
 - **MACD**: Confirms trend momentum (Threshold: > 0).
 - **SMA (50/200)**: Ensures price is trending above short-term support.
 - **Rule**: A stock must pass at least 2 of 3 technical criteria to be sent to the AI for deep analysis.
-- **Top 10 Selection**: The prescreened stocks are ranked by technical score, and only the top 10 are sent to AI for deep analysis.
+- **Top N Selection**: The prescreened stocks are ranked by technical score, and only the top N (configurable via `MAX_PRESCREENED_STOCKS`, default 10) are sent to AI for deep analysis.
 
 ### 5.2 AI Layer
 - **Tool Calling**: The AI has access to `get_ticker_news`, `get_price_history`, and `get_current_quote`.
@@ -182,6 +183,17 @@ Filters the FTSE 100 universe down to a manageable set of high-probability setup
 - **Retry Mechanism**: Implements exponential backoff (1s, 2s, 3s) for AI API calls to handle transient network issues.
 - **Remote AI Fallback**: When local AI returns no BUY recommendations, the system automatically escalates to remote AI for additional market analysis via `request_remote_recommendations()`.
 - **Remote Only Mode**: When `REMOTE_ONLY_MODE=true`, the system skips local AI analysis entirely and uses only remote AI.
+- **Temperature Control**: Both local and remote AI use configurable temperature settings (`LOCAL_AI_TEMPERATURE`, `REMOTE_AI_TEMPERATURE`, default 0.2) for deterministic outputs.
+- **Consistency Rules**: The system prompt includes mandatory consistency and threshold rules:
+    - Identical input data produces identical recommendations
+    - BUY: RSI < 60 + MACD > 0 + price > SMA50 (at least 2 of 3)
+    - SELL: RSI > 70 OR price < SMA50
+    - Confidence ranges: Strong (0.85-0.95), Moderate (0.75-0.85), Weak (0.60-0.75)
+- **Strict JSON Output**: All prompts require raw JSON output without markdown formatting or [THINK] blocks.
+- **Rule-Based Validation**: Trade validation uses deterministic rules instead of remote AI calls:
+    - confidence >= 0.8 → PROCEED
+    - confidence 0.6-0.8 → MODIFY (size reduced by 50%)
+    - confidence < 0.6 → REJECT
 
 ### 5.3 Database Schema (SQLite)
 ```mermaid
@@ -255,9 +267,13 @@ erDiagram
 - **Yahoo News**: Ticker-specific news fetched via Yahoo Finance API for targeted analysis.
 
 ### 6.2 API Authentication
-- **OpenRouter**: Requires a valid API key (`OPENROUTER_API_KEY`). This key is used for the expensive high-level reasoning and final trade safety checks.
+- **OpenRouter**: Requires a valid API key (`OPENROUTER_API_KEY`). This key is used for the expensive high-level reasoning and market recommendations.
 - **LM Studio**: Assumes a local server running on `http://localhost:1234/v1`. No API key is typically required for local instances.
 - **Remote Only Mode**: Set `REMOTE_ONLY_MODE=true` to skip local AI analysis and use only remote AI. Useful when remote AI is cheap enough or local AI is unavailable.
+- **Temperature Settings**: Both AI providers use configurable temperature:
+  - `LOCAL_AI_TEMPERATURE` (default: 0.2)
+  - `REMOTE_AI_TEMPERATURE` (default: 0.2)
+  - Lower values produce more consistent/deterministic outputs
 
 ### 6.3 Market Hours (LSE)
 - **Hours**: 08:00 to 16:30 GMT, Monday to Friday.
@@ -273,6 +289,7 @@ The bot uses a risk-controlled sizing model:
 ### 6.5 Data Persistence
 - **SQLite**: Stores the source of truth for stocks, trade history, and AI decisions.
 - **portfolio.json**: A lightweight backup file used specifically for tracking the `cash_balance` across restarts, ensuring the paper trading account remains consistent.
+- **Reset Behavior**: Using `--restart` flag removes both `trading.db` and `portfolio.json` to start fresh.
 
 ### 6.6 Monitoring Frequency
 - **Default**: 300 seconds (5 minutes).
@@ -291,11 +308,12 @@ The bot uses a risk-controlled sizing model:
 - **Error Handling**: If remote AI query fails, the system continues with only local recommendations.
 - **Skip Validation**: Remote AI recommendations are marked with `from_remote=True` and skip the additional `validate_with_remote_ai()` call since they were already validated by remote AI.
 
-### 6.9 Remote Only Mode
-- **Setting**: `REMOTE_ONLY_MODE=true` in `.env`
-- **Purpose**: Skip local AI analysis entirely and use only remote AI for market analysis.
-- **Use Case**: Useful when local AI is unavailable or when remote AI is cheap enough to use for primary analysis.
-- **Behavior**: When enabled, the system skips local AI analysis in `startup_analysis_with_prescreening()` and goes directly to `request_remote_recommendations()`.
+### 6.11 Prescreened Stock Limit
+
+- **Setting**: `MAX_PRESCREENED_STOCKS=N` in `.env` (default: 10)
+- **Purpose**: Control how many top-performing stocks are passed from technical prescreening to AI analysis.
+- **Behavior**: After technical screening, stocks are ranked by score and only the top N are sent for AI analysis with targeted news fetching.
+- **Use Case**: Adjust based on AI context window limits, API costs, or analysis depth requirements.
 
 ## 6.10 Testing Requirements
 
@@ -305,10 +323,11 @@ Per `tests/test_trading_modes.py`, the following behaviors MUST be tested:
    - Verifies that `workflow.run_startup_analysis()` exists
    - Analysis must run in both web mode and bot mode
 
-2. **Remote Validation Always Happens**: `test_remote_validation_always_happens()`
-   - Verifies that `decision_engine.validate_with_remote_ai()` exists
-   - Remote AI validation is NOT optional
-   - Must validate every BUY and SELL recommendation regardless of mode
+2. **Rule-Based Validation**: Validation uses deterministic rules instead of remote AI calls
+   - `workflows._apply_validation_rules()` implements validation logic
+   - confidence >= 0.8 → PROCEED
+   - confidence 0.6-0.8 → MODIFY (size reduced by 50%)
+   - confidence < 0.6 → REJECT
 
 3. **Paper Mode Auto-Executes Trades**:
    - In `workflows.py`: `if validation["decision"] == "PROCEED":` calls `self._execute_buy()`
@@ -350,7 +369,7 @@ The system fetches news from multiple RSS feeds:
 
 News is used in two ways:
 1. **General Market Context**: Top headlines from all feeds inform the AI about overall market sentiment
-2. **Targeted Stock News**: Specific news for top 10 prescreened stocks is fetched via Yahoo Finance API
+2. **Targeted Stock News**: Specific news for prescreened stocks is fetched via Yahoo Finance API (limited by `MAX_PRESCREENED_STOCKS`)
 
 ## 8. Containerization & Deployment
 
@@ -377,10 +396,17 @@ docker-compose up --build
 - **Database Schema**: Updated to include all actual fields and relationships (MarketSnapshot, AIDecision fields)
 - **AI Architecture**: Updated to reflect LM Studio (not Ollama) as local AI provider
 - **Workflow**: Updated to reflect hourly portfolio revaluation and top 10 stock selection
-- **Testing**: Updated to reflect that both BUY and SELL recommendations require remote validation
+- **Validation**: Changed from remote AI validation to rule-based validation for consistency
+- **Temperature Settings**: Added `LOCAL_AI_TEMPERATURE` and `REMOTE_AI_TEMPERATURE` (default 0.2)
+- **Consistency Rules**: Added mandatory consistency and technical threshold rules to system prompt
+- **Strict JSON Output**: Added output formatting rules to prevent markdown and [THINK] blocks
+- **Testing**: Updated to reflect that validation uses deterministic rules instead of remote AI
 - **Remote Only Mode**: Clarified behavior when enabled
 - **FTSE 100 Coverage**: Corrected to reflect all 100 stocks monitored
 - **Dashboard**: Updated "Planned Positions" to "Pending Decisions"
+- **Reset Command**: Updated `--restart` to also remove `portfolio.json` for complete reset
+- **Data Consistency**: Fixed issue where rejected decisions weren't marked as executed, causing mismatch between pending trades, active positions, and latest AI decisions after restart
+- **Configurable Prescreening**: Added `MAX_PRESCREENED_STOCKS` setting to control how many stocks pass from technical screening to AI analysis (default: 10)
 
 ### Version 1.0.1
 - Initial production-ready version
@@ -397,7 +423,30 @@ The system monitors all 100 FTSE 100 stocks (not 98 as previously stated), with 
 The system uses LM Studio (not Ollama) as the local AI provider, configured via `LM_STUDIO_API_URL` and `LM_STUDIO_MODEL` environment variables.
 
 ### Hourly Portfolio Revaluation
-The monitoring loop includes an hourly full portfolio revaluation feature that performs deep analysis on all open positions, fetching comprehensive historical data and escalating to Remote AI for validation regardless of local AI confidence levels.
+The monitoring loop includes an hourly full portfolio revaluation feature that performs deep analysis on all open positions, fetching comprehensive historical data and applying rule-based validation regardless of local AI confidence levels.
 
-### Top 10 Stock Selection
-During startup analysis, the prescreened stocks are ranked by technical score, and only the top 10 are sent to the AI for deep analysis with targeted news fetching.
+### Top N Stock Selection
+During startup analysis, the prescreened stocks are ranked by technical score, and only the top N (configurable via `MAX_PRESCREENED_STOCKS`, default 10) are sent to the AI for deep analysis with targeted news fetching.
+
+### Rule-Based Validation
+Trade validation uses deterministic rules in `workflows._apply_validation_rules()` instead of remote AI calls:
+- **PROCEED**: confidence >= 0.8
+- **MODIFY**: confidence 0.6-0.8 (position size reduced by 50%)
+- **REJECT**: confidence < 0.6
+
+All decisions (PROCEED, MODIFY, REJECT) are marked as `executed = True` after validation to ensure:
+- Pending decisions list stays synchronized with active positions
+- No "zombie" decisions remain in pending state after restart
+- Decisions are properly closed out regardless of validation outcome
+
+### Temperature Settings
+Both local and remote AI use configurable temperature settings (default 0.2) for consistent outputs:
+- `LOCAL_AI_TEMPERATURE` - controls local AI randomness
+- `REMOTE_AI_TEMPERATURE` - controls remote AI randomness
+
+### Technical Threshold Rules
+The system prompt includes mandatory rules for consistent AI decisions:
+- **BUY**: At least 2 of RSI < 60, MACD > 0, price > SMA50
+- **SELL**: Either RSI > 70 OR price < SMA50
+- **HOLD**: Any other combination
+- Confidence ranges: Strong (0.85-0.95), Moderate (0.75-0.85), Weak (0.60-0.75)

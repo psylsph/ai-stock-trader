@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     # LM Studio Configuration
     LM_STUDIO_API_URL: str = "http://localhost:1234/v1"
-    LM_STUDIO_MODEL: str = "mistralai/ministral-3-14b-reasoning"
+    LM_STUDIO_MODEL: str = "mistralai/ministral-3-3b"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
     REMOTE_ONLY_MODE: bool = True  # Skip local AI, use remote AI directly
@@ -29,9 +29,10 @@ class Settings(BaseSettings):
     TRADING_MODE: str = "paper"  # "paper" or "live"
     IGNORE_MARKET_HOURS: bool = False
     CHECK_INTERVAL_SECONDS: int = 300
-    INITIAL_BALANCE: float = 10000.0
+    INITIAL_BALANCE: float = 1000.0
     MAX_POSITIONS: int = 5  # Maximum number of open positions
     MAX_POSITION_SIZE_PCT: float = 0.20  # Max size of a single position (20%)
+    MAX_PRESCREENED_STOCKS: int = 10  # Maximum number of stocks to pass from prescreening to AI
 
     # Market Data
     RSS_FEEDS: list[str] = [
