@@ -80,6 +80,7 @@ class TradingWorkflow:
         """Execute a trade (BUY/SELL) after validation."""
         symbol = rec["symbol"]
         action = rec["action"]
+        print(f"[DEBUG] _execute_trade called: symbol={symbol}, action={action}, balance={balance}")
         print(f"Fetching quote for {symbol}...")
         quote = await self.market_data.get_quote(symbol)
         current_price = quote.price
@@ -91,17 +92,21 @@ class TradingWorkflow:
         if action == "BUY":
             size_pct = validation.get("new_size_pct", rec.get("size_pct", 0.05))
             
-            # Calculate target quantity based on total portfolio value
-            quantity = int((balance * size_pct) / current_price)
-            
-            # Cap quantity by available cash balance
+            # Calculate target quantity based on available cash
             cash_balance = await self.broker.get_account_balance()
-            max_qty_by_cash = int(cash_balance / current_price)
-            if quantity > max_qty_by_cash:
-                print(f"[DEBUG] Capping quantity for {symbol} from {quantity} to {max_qty_by_cash} due to cash limit ({cash_balance:.2f})")
-                quantity = max_qty_by_cash
-
-            print(f"[DEBUG] BUY calculation: balance={balance}, cash={cash_balance}, size_pct={size_pct}, price={current_price}, quantity={quantity}")
+            target_amount = cash_balance * size_pct
+            quantity = int(target_amount / current_price)
+            
+            # If we can't buy even 1 share at target allocation, buy 1 share if affordable
+            # This ensures we participate in trades even with small allocations
+            if quantity == 0:
+                if cash_balance >= current_price:
+                    quantity = 1
+                    print(f"[DEBUG] Adjusted: Buying 1 share (target allocation too small for price {current_price})")
+                else:
+                    print(f"[DEBUG] Cannot afford {symbol} at price {current_price} with cash {cash_balance}")
+            
+            print(f"[DEBUG] BUY calculation: cash={cash_balance}, size_pct={size_pct}, target_amount={target_amount:.2f}, price={current_price}, quantity={quantity}")
 
             if quantity > 0:
                 current_positions = await self.broker.get_positions()
@@ -197,17 +202,81 @@ class TradingWorkflow:
                 "new_size_pct": None
             }
 
-    def _select_top_technical_picks(self, prescreened_tickers: Dict[str, Dict[str, Any]], limit: int = 10) -> Dict[str, Dict[str, Any]]:
-        """Sort prescreened stocks by technical score and return top N."""
+    def _is_ticker(self, value: str) -> bool:
+        """Check if value looks like a stock ticker (contains letters and .L or similar)."""
+        return bool(value.replace(".", "").isalpha())
+
+    def _get_prescreen_limit(self, prescreened_tickers: Dict[str, Dict[str, Any]]) -> tuple[int | None, str]:
+        """Parse MAX_PRESCREENED_STOCKS setting and return (limit, description).
+        
+        Returns:
+            tuple of (limit_or_None, description_string)
+            - If numeric: returns (int, "N stocks")
+            - If ticker: returns (None, "stocks above TICKER")
+        """
+        value = str(self.settings.MAX_PRESCREENED_STOCKS).strip()
+        
+        if self._is_ticker(value):
+            return None, f"stocks above {value}"
+        else:
+            try:
+                return int(value), f"top {value} stocks"
+            except ValueError:
+                print(f"[WARNING] Invalid MAX_PRESCREENED_STOCKS value: {value}, defaulting to 10")
+                return 10, "top 10 stocks"
+
+    def _select_top_technical_picks(
+        self, 
+        prescreened_tickers: Dict[str, Dict[str, Any]], 
+        limit: int | None = None,
+        cutoff_ticker: str | None = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Sort ALL prescreened stocks by technical score and return based on limit type.
+        
+        Unlike other methods, this scores ALL stocks first (not just passed ones),
+        then applies the cutoff. This ensures the cutoff ticker is always found.
+        
+        Args:
+            prescreened_tickers: Dict of ticker to indicator results
+            limit: If set, return top N stocks
+            cutoff_ticker: If set, return all stocks scoring >= this ticker
+        """
+        # Score ALL stocks first (not just passed ones)
         scored_stocks = []
         for ticker, indicators in prescreened_tickers.items():
-            if indicators.get("passed", False):
-                score = self.prescreener.score_stock(indicators)
-                scored_stocks.append((ticker, score, indicators))
+            score = self.prescreener.score_stock(indicators)
+            scored_stocks.append((ticker, score, indicators))
         
         # Sort by score descending
         scored_stocks.sort(key=lambda x: x[1], reverse=True)
-        return {ticker: indicators for ticker, score, indicators in scored_stocks[:limit]}
+        
+        if cutoff_ticker:
+            # Find the cutoff ticker's score - search in ALL stocks
+            cutoff_score = None
+            
+            if cutoff_ticker in prescreened_tickers:
+                indicators = prescreened_tickers[cutoff_ticker]
+                cutoff_score = self.prescreener.score_stock(indicators)
+            
+            if cutoff_score is None:
+                print(f"[WARNING] Cutoff ticker {cutoff_ticker} not found, using default of 10")
+                return {ticker: indicators for ticker, score, indicators in scored_stocks[:10]}
+            
+            print(f"[DEBUG] Cutoff ticker {cutoff_ticker} has score {cutoff_score}")
+            
+            # Return ALL stocks (passed or not) with score >= cutoff_score
+            selected = [(t, s, ind) for t, s, ind in scored_stocks if s >= cutoff_score]
+            selected.sort(key=lambda x: x[1], reverse=True)
+            return {ticker: indicators for ticker, score, indicators in selected}
+        elif limit:
+            # Return top N by score (all passed stocks since they have scores)
+            # But filter to only include passed ones for AI analysis
+            passed_stocks = [(t, s, ind) for t, s, ind in scored_stocks if ind.get("passed", False)]
+            return {ticker: indicators for ticker, score, indicators in passed_stocks[:limit]}
+        else:
+            # Return all (filter to passed ones only)
+            passed_stocks = [(t, s, ind) for t, s, ind in scored_stocks if ind.get("passed", False)]
+            return {ticker: indicators for ticker, score, indicators in passed_stocks}
 
     async def run_startup_analysis(self):
         """Run startup market analysis with remote validation.
@@ -223,6 +292,7 @@ class TradingWorkflow:
 
         # 2. Get Market Status
         market_status = await self.market_data.get_market_status()
+        print(f"[DEBUG] Market status: is_open={market_status.is_open}, IGNORE_MARKET_HOURS={self.settings.IGNORE_MARKET_HOURS}")
         if not market_status.is_open:
             print("Market is currently CLOSED.")
 
@@ -347,9 +417,16 @@ class TradingWorkflow:
         passed_count = sum(1 for v in prescreened_tickers.values() if v.get("passed", False))
         print(f"Prescreened {passed_count} / {len(ftse100_tickers)} stocks")
 
-        max_stocks = self.settings.MAX_PRESCREENED_STOCKS
-        print(f"\nSelecting top {max_stocks} stocks based on technical indicators...")
-        top_stocks = self._select_top_technical_picks(prescreened_tickers, limit=max_stocks)
+        max_stocks, limit_desc = self._get_prescreen_limit(prescreened_tickers)
+        print(f"\nSelecting {limit_desc} based on technical indicators...")
+        
+        # Determine if we're using numeric limit or ticker cutoff
+        if max_stocks is not None:
+            top_stocks = self._select_top_technical_picks(prescreened_tickers, limit=max_stocks)
+        else:
+            # Parse the ticker from the description
+            cutoff_ticker = str(self.settings.MAX_PRESCREENED_STOCKS).strip()
+            top_stocks = self._select_top_technical_picks(prescreened_tickers, cutoff_ticker=cutoff_ticker)
         
         if top_stocks:
             print(f"Selected: {', '.join(top_stocks.keys())}")
@@ -357,8 +434,11 @@ class TradingWorkflow:
             print("No stocks passed technical prescreening.")
 
         # 6. Get targeted news for top stocks
-        print(f"\nFetching news for top {max_stocks} technical picks...")
-        filtered_news = await self._fetch_filtered_news(top_stocks)
+        print(f"\nFetching news for {limit_desc}...")
+        if top_stocks:
+            filtered_news = await self._fetch_filtered_news(top_stocks)
+        else:
+            filtered_news = {}
 
         # Create filtered news summary
         news_summary = self._create_filtered_news_summary(
@@ -367,7 +447,7 @@ class TradingWorkflow:
         )
 
         # 7. Local AI Analysis on top stocks with news
-        print(f"\nRunning AI Analysis on Top {max_stocks} Technical Picks with News...")
+        print(f"\nRunning AI Analysis on {limit_desc} with News...")
 
         max_retries = self.settings.AI_MAX_RETRIES
         retry_delay = self.settings.AI_RETRY_DELAY_SECONDS
@@ -521,7 +601,8 @@ class TradingWorkflow:
                         total_value = current_balance
                         for p in current_positions:
                             p_quote = await self.market_data.get_quote(p["symbol"])
-                            total_value += p["quantity"] * p_quote.price
+                            if p_quote and p_quote.price:
+                                total_value += p["quantity"] * p_quote.price
 
                         print(f"[DEBUG] Executing trade: balance={current_balance}, total_value={total_value}")
                         success = await self._execute_trade(rec, validation, total_value)
@@ -540,14 +621,22 @@ class TradingWorkflow:
                         )
 
                 elif rec["action"] in ["BUY", "SELL"]:
-                    print(f"\nValidating {rec['action']} for {rec['symbol']} with rule-based validation...")
+                    print(f"\nValidating {rec['action']} for {rec['symbol']} with remote AI...")
 
-                    validation = self._apply_validation_rules(
+                    # Get reasoning from the recommendation
+                    reasoning = rec.get("reasoning", "No reasoning provided")
+                    size_pct = rec.get("size_pct", 0.05)
+
+                    # Validate with remote AI instead of rule-based validation
+                    validation = await self.decision_engine.validate_with_remote_ai(
                         action=rec["action"],
-                        confidence=rec["confidence"]
+                        symbol=rec["symbol"],
+                        reasoning=reasoning,
+                        confidence=rec["confidence"],
+                        size_pct=size_pct
                     )
 
-                    print(f"Validation: {validation['decision']} - {validation['comments']}")
+                    print(f"Remote AI Validation: {validation['decision']} - {validation.get('comments', '')}")
 
                     # Update decision with validation results
                     await self.repo.update_decision_with_validation(
@@ -555,7 +644,7 @@ class TradingWorkflow:
                         remote_validation_decision=validation["decision"],
                         remote_validation_comments=validation.get("comments", ""),
                         requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED" and not self.settings.IGNORE_MARKET_HOURS,
-                        new_confidence=validation.get("new_confidence")
+                        new_confidence=validation.get("new_confidence", rec["confidence"])
                     )
 
                     if validation["decision"] in ["PROCEED", "MODIFY"]:
@@ -580,7 +669,8 @@ class TradingWorkflow:
                             total_value = current_balance
                             for p in current_positions:
                                 p_quote = await self.market_data.get_quote(p["symbol"])
-                                total_value += p["quantity"] * p_quote.price
+                                if p_quote and p_quote.price:
+                                    total_value += p["quantity"] * p_quote.price
 
                             print(f"[DEBUG] Executing trade: balance={current_balance}, total_value={total_value}")
                             success = await self._execute_trade(target_rec, validation, total_value)
@@ -914,7 +1004,8 @@ class TradingWorkflow:
                                 total_value = current_balance
                                 for p in current_positions:
                                     p_quote = await self.market_data.get_quote(p["symbol"])
-                                    total_value += p["quantity"] * p_quote.price
+                                    if p_quote and p_quote.price:
+                                        total_value += p["quantity"] * p_quote.price
 
                                 success = await self._execute_trade(sell_rec, validation, balance=total_value)
                                 if success:

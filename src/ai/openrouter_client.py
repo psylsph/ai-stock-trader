@@ -19,8 +19,9 @@ class OpenRouterClient:
             api_key: The API key for OpenRouter.
             model: The model name to use.
         """
+        base_url = getattr(settings, 'OPENROUTER_API_URL', 'https://openrouter.ai/api/v1')
         self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=base_url,
             api_key=api_key,
         )
         self.model = model

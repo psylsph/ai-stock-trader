@@ -156,6 +156,8 @@ class TestPrescreening:
             signal=0.5,
             sma_50=95.0,
             sma_200=90.0,
+            bb_lower=90.0,
+            bb_upper=110.0,
             current_price=100.0
         )
 
@@ -173,6 +175,8 @@ class TestPrescreening:
             signal=-1.0,
             sma_50=100.0,
             sma_200=90.0,
+            bb_lower=90.0,
+            bb_upper=110.0,
             current_price=95.0
         )
 
@@ -190,6 +194,8 @@ class TestPrescreening:
             signal=0.2,
             sma_50=95.0,
             sma_200=90.0,
+            bb_lower=90.0,
+            bb_upper=110.0,
             current_price=100.0
         )
 
@@ -207,6 +213,8 @@ class TestPrescreening:
             signal=2.0,
             sma_50=90.0,
             sma_200=80.0,
+            bb_lower=90.0,
+            bb_upper=110.0,
             current_price=100.0
         )
 
@@ -222,6 +230,8 @@ class TestPrescreening:
             signal=1.5,
             sma_50=95.0,
             sma_200=90.0,
+            bb_lower=90.0,
+            bb_upper=110.0,
             current_price=100.0  # Above SMA50
         )
 
@@ -271,7 +281,7 @@ class TestStockRanking:
         """Test bearish stock scoring."""
         prescreener = StockPrescreener()
 
-        # Bearish: RSI > 70 (-100), MACD < 0 (0), Price < SMA50 (0) = -100
+        # Bearish: RSI > 70 (-50), MACD < 0 (0), Price < SMA50 (0) = -50
         indicators = {
             "rsi": 75.0,
             "macd": -1.0,
@@ -281,8 +291,8 @@ class TestStockRanking:
 
         score = prescreener.score_stock(indicators)
 
-        # Should be -100
-        assert score == -100.0
+        # Should be -50
+        assert score == -50.0
 
 
 class TestPrescreenStocks:

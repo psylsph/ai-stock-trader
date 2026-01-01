@@ -65,6 +65,28 @@ class StockPrescreener:
 
         return float(sum(prices[-period:]) / period)
 
+    def calculate_bollinger_bands(self, prices: List[float], period: int = 20, std_mult: float = 2.0) -> tuple[float, float, float]:
+        """
+        Calculate Bollinger Bands.
+        
+        Returns:
+            Tuple of (lower_band, middle_band, upper_band)
+        """
+        if len(prices) < period:
+            return 0.0, 0.0, 0.0
+        
+        middle = self.calculate_sma(prices, period)
+        
+        # Calculate standard deviation
+        slice_prices = prices[-period:]
+        variance = sum((p - middle) ** 2 for p in slice_prices) / period
+        std_dev = variance ** 0.5
+        
+        lower = middle - (std_mult * std_dev)
+        upper = middle + (std_mult * std_dev)
+        
+        return float(lower), float(middle), float(upper)
+
     async def prescreen_stocks(
         self,
         tickers: List[str],
@@ -113,6 +135,9 @@ class StockPrescreener:
                     "signal": 0.0,
                     "sma_50": 50.0,
                     "sma_200": 50.0,
+                    "bb_lower": 0.0,
+                    "bb_middle": 0.0,
+                    "bb_upper": 0.0,
                     "current_price": 0.0,
                     "passed": False
                 }
@@ -123,6 +148,7 @@ class StockPrescreener:
             macd, signal = self.calculate_macd(prices)
             sma_50 = self.calculate_sma(prices, 50)
             sma_200 = self.calculate_sma(prices, 200)
+            bb_lower, bb_middle, bb_upper = self.calculate_bollinger_bands(prices)
 
             current_price = prices[-1]
 
@@ -132,6 +158,8 @@ class StockPrescreener:
                 signal=signal,
                 sma_50=sma_50,
                 sma_200=sma_200,
+                bb_lower=bb_lower,
+                bb_upper=bb_upper,
                 current_price=current_price
             )
 
@@ -141,6 +169,9 @@ class StockPrescreener:
                 "signal": signal,
                 "sma_50": sma_50,
                 "sma_200": sma_200,
+                "bb_lower": bb_lower,
+                "bb_middle": bb_middle,
+                "bb_upper": bb_upper,
                 "current_price": current_price,
                 "passed": bool(passed)
             }
@@ -152,6 +183,9 @@ class StockPrescreener:
                 "signal": 0.0,
                 "sma_50": 50.0,
                 "sma_200": 50.0,
+                "bb_lower": 0.0,
+                "bb_middle": 0.0,
+                "bb_upper": 0.0,
                 "current_price": 0.0,
                 "passed": False
             }
@@ -163,16 +197,18 @@ class StockPrescreener:
         signal: float,
         sma_50: float,
         sma_200: float,
+        bb_lower: float,
+        bb_upper: float,
         current_price: float
     ) -> bool:
         """Evaluate if stock passes prescreening criteria."""
-        # MUST NOT be overbought (RSI > 70)
+        # MUST NOT be overbought (RSI > 70) or at upper Bollinger Band
         if rsi >= 70:
             return False
 
         criteria_met = 0
 
-        # Optional bullish criteria (must meet at least 2)
+        # Bullish criteria (must meet at least 2)
         if rsi < 30: # Oversold / Value opportunity
             criteria_met += 1
 
@@ -180,6 +216,9 @@ class StockPrescreener:
             criteria_met += 1
 
         if macd > 0: # Momentum
+            criteria_met += 1
+
+        if bb_lower > 0 and current_price <= bb_lower: # At or below lower Bollinger Band (oversold)
             criteria_met += 1
 
         return criteria_met >= 2
@@ -195,16 +234,23 @@ class StockPrescreener:
         macd = indicators.get("macd", 0.0)
         current_price = indicators.get("current_price", 0.0)
         sma_50 = indicators.get("sma_50", 0.0)
+        bb_lower = indicators.get("bb_lower", 0.0)
+        bb_upper = indicators.get("bb_upper", 0.0)
+        bb_middle = indicators.get("bb_middle", 0.0)
         
-        # 1. RSI Score: Prefer lower RSI (oversold) but not overbought
+        # 1. RSI Score: Smooth curve - lower is better but not overbought
         if rsi < 30:
             score += 40  # Very bullish (oversold)
+        elif rsi < 40:
+            score += 30  # Bullish
         elif rsi < 50:
-            score += 20  # Neutral-Bullish
+            score += 25  # Mildly bullish
+        elif rsi < 60:
+            score += 15  # Neutral
         elif rsi < 70:
-            score += 5   # Neutral-Bearish
+            score += 5   # Mildly bearish
         else:
-            score -= 100 # Overbought
+            score -= 50  # Overbought penalty
             
         # 2. MACD Score: Positive MACD is bullish
         if macd > 0:
@@ -214,4 +260,25 @@ class StockPrescreener:
         if current_price > sma_50:
             score += 30
             
+        # 4. Bollinger Bands Score
+        if bb_lower > 0 and bb_upper > 0:
+            bb_range = bb_upper - bb_lower
+            if bb_range > 0:
+                # Price position within bands (0 = at lower band, 1 = at upper band)
+                price_position = (current_price - bb_lower) / bb_range
+                
+                # Reward being near or below lower band (oversold)
+                if price_position < 0.1:  # Within 10% of lower band
+                    score += 25
+                elif price_position < 0.2:  # Within 20% of lower band
+                    score += 15
+                elif price_position < 0.3:  # Within 30% of lower band
+                    score += 5
+                    
+                # Penalize being near or above upper band (overbought)
+                if price_position > 0.9:  # Within 10% of upper band
+                    score -= 15
+                elif price_position > 0.8:  # Within 20% of upper band
+                    score -= 5
+                    
         return score

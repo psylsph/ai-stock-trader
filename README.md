@@ -55,7 +55,8 @@ An advanced AI-powered stock trading bot designed for the **London Stock Exchang
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `INITIAL_BALANCE` | 1000 | Starting balance for paper trading |
-| `MAX_PRESCREENED_STOCKS` | 10 | Number of top technical stocks to pass from prescreening to AI analysis |
+| `MAX_PRESCREENED_STOCKS` | 10 | Number (e.g., "10") or ticker (e.g., "BA.L") - top N stocks or all stocks scoring above the cutoff ticker |
+| `OPENROUTER_API_URL` | https://openrouter.ai/api/v1 | OpenRouter endpoint URL (override for custom endpoints) |
 
 ### Run the Bot
 

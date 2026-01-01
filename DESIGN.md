@@ -310,10 +310,18 @@ The bot uses a risk-controlled sizing model:
 
 ### 6.11 Prescreened Stock Limit
 
-- **Setting**: `MAX_PRESCREENED_STOCKS=N` in `.env` (default: 10)
-- **Purpose**: Control how many top-performing stocks are passed from technical prescreening to AI analysis.
-- **Behavior**: After technical screening, stocks are ranked by score and only the top N are sent for AI analysis with targeted news fetching.
-- **Use Case**: Adjust based on AI context window limits, API costs, or analysis depth requirements.
+- **Setting**: `MAX_PRESCREENED_STOCKS` in `.env` (default: "10")
+- **Purpose**: Control which stocks are passed from technical prescreening to AI analysis.
+- **Modes of Operation**:
+  - **Numeric**: Set to a number (e.g., "10") to take the top N stocks by technical score
+  - **Ticker-based**: Set to a ticker (e.g., "BA.L") to take all stocks scoring higher than the cutoff ticker
+- **Behavior**: 
+  - After technical screening, stocks are ranked by technical score
+  - For numeric mode: only the top N stocks are sent for AI analysis
+  - For ticker mode: all stocks with score higher than the cutoff ticker are selected
+- **Example Usage**:
+  - `MAX_PRESCREENED_STOCKS=10` → Top 10 stocks by technical score
+  - `MAX_PRESCREENED_STOCKS=BA.L` → All stocks scoring higher than BA.L
 
 ## 6.10 Testing Requirements
 

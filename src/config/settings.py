@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # AI Configuration
     OPENROUTER_API_KEY: str = ""
+    OPENROUTER_API_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_MODEL: str = "x-ai/grok-4"
 
     # LM Studio Configuration
@@ -32,7 +33,7 @@ class Settings(BaseSettings):
     INITIAL_BALANCE: float = 1000.0
     MAX_POSITIONS: int = 5  # Maximum number of open positions
     MAX_POSITION_SIZE_PCT: float = 0.20  # Max size of a single position (20%)
-    MAX_PRESCREENED_STOCKS: int = 10  # Maximum number of stocks to pass from prescreening to AI
+    MAX_PRESCREENED_STOCKS: str = "10"  # Number (e.g., "10") or ticker (e.g., "BA.L") for prescreening cutoff
 
     # Market Data
     RSS_FEEDS: list[str] = [

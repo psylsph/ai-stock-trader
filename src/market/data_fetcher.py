@@ -160,7 +160,9 @@ class YahooFinanceFetcher(MarketDataFetcher):
         Returns:
             MarketStatus object with current market state.
         """
+        print(f"[DEBUG] get_market_status: IGNORE_MARKET_HOURS={settings.IGNORE_MARKET_HOURS}")
         if settings.IGNORE_MARKET_HOURS:
+            print("[DEBUG] Test mode active - market marked as OPEN")
             return MarketStatus(is_open=True, next_open=None, next_close=None)
 
         now = datetime.now(self.tz)
