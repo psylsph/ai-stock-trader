@@ -107,8 +107,16 @@ sequenceDiagram
                     Bot->>DB: Log Trade with manual_review_required flag
                 else Sell Action
                     Bot->>DB: Log Trade with manual_review_required flag
+            end
         end
     end
+
+end
+    Bot->>Mkt: Get End-of-Day Market Data
+    Bot->>DB: Log Daily Performance Metrics
+end
+
+end
 ```
 
 ### 3.2 Intraday Monitoring Loop

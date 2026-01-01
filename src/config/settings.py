@@ -13,7 +13,9 @@ class Settings(BaseSettings):
     LM_STUDIO_MODEL: str = "mistralai/ministral-3-14b-reasoning"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
-    REMOTE_ONLY_MODE: bool = False  # Skip local AI, use remote AI directly
+    REMOTE_ONLY_MODE: bool = True  # Skip local AI, use remote AI directly
+    LOCAL_AI_TEMPERATURE: float = 0.2  # Local AI temperature (0.0-1.0, lower = more consistent)
+    REMOTE_AI_TEMPERATURE: float = 0.2  # Remote AI temperature (0.0-1.0, lower = more consistent)
 
     # Streaming & Retry Configuration
     USE_STREAMING: bool = True
@@ -36,7 +38,9 @@ class Settings(BaseSettings):
         "https://news.yahoo.com/rss/uk",
         "https://finance.yahoo.com/news/rssindex",
         "https://feeds.bbci.co.uk/news/uk/rss.xml",
-        "https://feeds.bbci.co.uk/news/business/rss.xml"
+        "https://feeds.bbci.co.uk/news/business/rss.xml",
+        "https://money.com/money/feed/",
+        "https://www.ft.com/rss/home/international"
     ]
 
     model_config = SettingsConfigDict(

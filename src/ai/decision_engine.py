@@ -8,6 +8,7 @@ from src.ai.local_ai_client import LocalAIClient
 from src.ai.openrouter_client import OpenRouterClient
 from src.database.models import Position
 from src.ai.tools import TradingTools
+from src.config.settings import settings
 from .prompts import SYSTEM_PROMPT
 
 
@@ -103,6 +104,7 @@ class TradingDecisionEngine:
         try:
             completion = await self.remote_ai.client.chat.completions.create(
                 model=self.remote_ai.model,
+                temperature=settings.REMOTE_AI_TEMPERATURE,
                 messages=[
                     {
                         "role": "system",
@@ -164,6 +166,7 @@ class TradingDecisionEngine:
         try:
             completion = await self.remote_ai.client.chat.completions.create(
                 model=self.remote_ai.model,
+                temperature=settings.REMOTE_AI_TEMPERATURE,
                 messages=[
                     {
                         "role": "system",

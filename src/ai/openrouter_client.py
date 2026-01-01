@@ -5,6 +5,7 @@ from typing import Dict, Any
 
 from openai import AsyncOpenAI
 
+from src.config.settings import settings
 from .prompts import REMOTE_MARKET_ANALYSIS_PROMPT, SYSTEM_PROMPT
 
 
@@ -66,6 +67,7 @@ class OpenRouterClient:
         try:
             completion = await self.client.chat.completions.create(
                 model=self.model,
+                temperature=settings.REMOTE_AI_TEMPERATURE,
                 messages=[
                     {
                         "role": "system",

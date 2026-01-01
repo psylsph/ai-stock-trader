@@ -19,7 +19,10 @@ class DatabaseRepository:
         Args:
             db_url: The database connection URL.
         """
-        self.engine = create_async_engine(db_url)
+        self.engine = create_async_engine(
+            db_url,
+            pool_pre_ping=True
+        )
         self.session_maker = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def init_db(self):
@@ -40,7 +43,7 @@ class DatabaseRepository:
             List of active Stock objects.
         """
         async with self.session_maker() as session:
-            result = await session.execute(select(Stock).where(Stock.is_active is True))  # type: ignore[arg-type]
+            result = await session.execute(select(Stock).where(Stock.is_active.is_(True)))
             return list(result.scalars().all())
 
     async def get_or_create_stock(self, symbol: str, name: str, type_: str = "stock") -> Stock:
