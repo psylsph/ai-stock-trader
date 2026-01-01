@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     LM_STUDIO_MODEL: str = "mistralai/ministral-3-14b-reasoning"
     ENABLE_TOOLS: bool = True
     ENABLE_VISION: bool = True
+    REMOTE_ONLY_MODE: bool = False  # Skip local AI, use remote AI directly
 
     # Streaming & Retry Configuration
     USE_STREAMING: bool = True

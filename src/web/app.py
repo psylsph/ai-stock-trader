@@ -127,7 +127,8 @@ async def get_status():
                 "quantity": p.quantity,
                 "entry_price": p.entry_price,
                 "current_price": p.current_price,
-                "pnl_pct": ((p.current_price - p.entry_price) / p.entry_price * 100) if p.entry_price else 0
+                "total_value": p.total_value,
+                "pnl_pct": p.pnl_pct
             } for p in positions
         ],
         "latest_decisions": latest_decisions_json,

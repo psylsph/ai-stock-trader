@@ -81,6 +81,26 @@ class TradingDecisionEngine:
         """
 
         try:
+            return await self._validation_call_with_retry(validation_prompt)
+        except Exception as e:  # pylint: disable=broad-except
+            return {
+                "decision": "PROCEED",
+                "comments": f"Validation failed, proceeding with original: {str(e)}"
+            }
+
+    async def _validation_call_with_retry(self, prompt: str, retry_count: int = 0) -> Dict[str, Any]:
+        """Make a validation API call with retry logic for token limit errors.
+
+        If the request fails due to token limits, strips ":free" from model name and retries.
+
+        Args:
+            prompt: The prompt to send to the AI.
+            retry_count: Number of retries attempted.
+
+        Returns:
+            Validation decision from remote AI.
+        """
+        try:
             completion = await self.remote_ai.client.chat.completions.create(
                 model=self.remote_ai.model,
                 messages=[
@@ -90,7 +110,7 @@ class TradingDecisionEngine:
                     },
                     {
                         "role": "user",
-                        "content": validation_prompt
+                        "content": prompt
                     }
                 ],
                 response_format={"type": "json_object"}
@@ -101,13 +121,177 @@ class TradingDecisionEngine:
                 raise ValueError("No content in response")
 
             validation_result = json.loads(content)
-
             return validation_result
 
         except Exception as e:  # pylint: disable=broad-except
+            error_msg = str(e).lower()
+
+            # Check if this is a token limit or context length error
+            token_errors = ["context_length_exceeded", "too many tokens", "token limit", "context window", "max_tokens"]
+
+            # Check if model has :free suffix and we haven't retried yet
+            if retry_count == 0 and ":free" in self.remote_ai.model:
+                for token_error in token_errors:
+                    if token_error in error_msg:
+                        print(f"[DEBUG] Token limit error with :free model, retrying without :free suffix...")
+                        # Retry with model name without :free
+                        original_model = self.remote_ai.model
+                        self.remote_ai.model = self.remote_ai.model.replace(":free", "")
+                        try:
+                            result = await self._validation_call_with_retry(prompt, retry_count=1)
+                            # Restore original model for future calls
+                            self.remote_ai.model = original_model
+                            return result
+                        except Exception:  # pylint: disable=broad-except
+                            # Restore original model and fall through to error handling
+                            self.remote_ai.model = original_model
+                            break
+
+            raise  # Re-raise the original exception
+
+    async def _validate_with_retry(self, prompt: str, retry_count: int = 0) -> Dict[str, Any]:
+        """Make an API call with retry logic for token limit errors.
+
+        If the request fails due to token limits, strips ":free" from model name and retries.
+
+        Args:
+            prompt: The prompt to send to the AI.
+            retry_count: Number of retries attempted.
+
+        Returns:
+            Response from remote AI.
+        """
+        try:
+            completion = await self.remote_ai.client.chat.completions.create(
+                model=self.remote_ai.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                response_format={"type": "json_object"}
+            )
+
+            content = completion.choices[0].message.content
+            if content is None:
+                raise ValueError("No content in response")
+
+            import re
+            content = re.sub(r'\[THINK\].*?\[/THINK\]', '', content, flags=re.DOTALL)
+            start = content.find('{')
+            end = content.rfind('}')
+            if start != -1 and end != -1:
+                content = content[start:end+1]
+
+            return json.loads(content)
+
+        except Exception as e:  # pylint: disable=broad-except
+            error_msg = str(e).lower()
+
+            # Check if this is a token limit or context length error
+            token_errors = ["context_length_exceeded", "too many tokens", "token limit", "context window", "max_tokens"]
+
+            # Check if model has :free suffix and we haven't retried yet
+            if retry_count == 0 and ":free" in self.remote_ai.model:
+                for token_error in token_errors:
+                    if token_error in error_msg:
+                        print(f"[DEBUG] Token limit error with :free model, retrying without :free suffix...")
+                        # Retry with model name without :free
+                        original_model = self.remote_ai.model
+                        self.remote_ai.model = self.remote_ai.model.replace(":free", "")
+                        try:
+                            result = await self._validate_with_retry(prompt, retry_count=1)
+                            # Restore original model for future calls
+                            self.remote_ai.model = original_model
+                            return result
+                        except Exception:  # pylint: disable=broad-except
+                            # Restore original model and fall through to error handling
+                            self.remote_ai.model = original_model
+                            break
+
+            raise  # Re-raise the original exception
+
+    async def request_remote_recommendations(
+        self,
+        portfolio_summary: str,
+        market_status: str,
+        prescreened_tickers: Dict[str, Dict[str, Any]],
+        rss_news_summary: str
+    ) -> Dict[str, Any]:
+        """Request trading recommendations from remote AI.
+
+        Used when local AI has no BUY recommendations.
+
+        Returns:
+            Dict with analysis_summary and recommendations from remote AI.
+        """
+        prompt = f"""
+You are analyzing the TOP FTSE 100 stocks based on pre-filtering.
+
+Technical Leaders ({len(prescreened_tickers)} stocks):
+{', '.join(prescreened_tickers.keys())}
+
+Indicator Results:
+"""
+        for ticker, indicators in prescreened_tickers.items():
+            prompt += f"""
+{ticker}:
+  - RSI (14): {indicators['rsi']:.1f}
+  - MACD: {indicators['macd']:.2f} (Signal: {'Bullish' if indicators['signal'] > 0 else 'Bearish'})
+  - SMA 50: £{indicators['sma_50']:.2f}
+  - SMA 200: £{indicators['sma_200']:.2f}
+  - Current Price: £{indicators['current_price']:.2f}
+  - Passed Prescreening: {indicators['passed']}
+"""
+
+        prompt += f"""
+
+Portfolio Status:
+{portfolio_summary}
+
+Market Status:
+{market_status}
+
+News Summary for Prescreened Stocks:
+{rss_news_summary}
+
+Task: Analyze the prescreened stocks with their news data and provide trading recommendations.
+Consider each stock's technical setup and sentiment from their news.
+If there are good buying opportunities, recommend BUYs. If not, recommend HOLD.
+
+CRITICAL OUTPUT INSTRUCTIONS:
+1. ALL trading recommendations (BUY/SELL/HOLD) MUST be included in the "recommendations" JSON list.
+2. The "analysis_summary" field should provide high-level market context ONLY.
+3. DO NOT put actionable recommendations inside "analysis_summary".
+4. Return ONLY the raw JSON object. No preamble, no postamble, no markdown blocks.
+
+Return your response in strict JSON format:
+{{
+    "analysis_summary": "High level market overview...",
+    "recommendations": [
+        {{
+            "action": "BUY"|"SELL"|"HOLD",
+            "symbol": "...",
+            "reasoning": "...",
+            "confidence": 0.85,
+            "size_pct": 0.1
+        }}
+    ]
+}}
+"""
+
+        try:
+            return await self._validate_with_retry(prompt)
+
+        except Exception as e:  # pylint: disable=broad-except
             return {
-                "decision": "PROCEED",
-                "comments": f"Validation failed, proceeding with original: {str(e)}"
+                "analysis_summary": f"Error getting remote recommendations: {str(e)}",
+                "recommendations": []
             }
 
     async def intraday_check(
@@ -121,7 +305,13 @@ class TradingDecisionEngine:
         Check position with local AI, escalate if needed.
         Returns a decision dict: {"action": "HOLD"|"SELL", "reasoning": "...", "escalated": bool}
         """
-        holding_days = (datetime.now(timezone.utc) - position.entry_date).days
+        # Handle potential naive/aware datetime comparison issues
+        now_aware = datetime.now(timezone.utc)
+        entry_date = position.entry_date
+        if entry_date.tzinfo is None:
+            entry_date = entry_date.replace(tzinfo=timezone.utc)
+
+        holding_days = (now_aware - entry_date).days
 
         # 1. Local Check
         local_decision = await self.local_ai.analyze_position(

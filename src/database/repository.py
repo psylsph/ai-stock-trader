@@ -216,3 +216,25 @@ class DatabaseRepository:
     async def close(self):
         """Close the database engine and dispose of all connections."""
         await self.engine.dispose()
+
+    async def was_bought_today(self, symbol: str) -> bool:
+        """Check if a symbol was bought today.
+
+        Args:
+            symbol: The stock symbol to check.
+
+        Returns:
+            True if the symbol was bought today, False otherwise.
+        """
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        async with self.session_maker() as session:
+            result = await session.execute(
+                select(Trade).where(
+                    and_(
+                        Trade.stock.has(Stock.symbol == symbol),
+                        Trade.action == "BUY",
+                        Trade.timestamp >= today_start
+                    )
+                )
+            )
+            return result.scalar_one_or_none() is not None

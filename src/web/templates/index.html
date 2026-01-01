@@ -48,10 +48,11 @@
                     <thead>
                         <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
                             <th class="px-6 py-4 font-semibold">Symbol</th>
-                            <th class="px-6 py-4 font-semibold">Quantity</th>
-                            <th class="px-6 py-4 font-semibold">Entry Price</th>
-                            <th class="px-6 py-4 font-semibold">Current Price</th>
-                            <th class="px-6 py-4 font-semibold">P&L</th>
+                            <th class="px-6 py-4 font-semibold text-right">Quantity</th>
+                            <th class="px-6 py-4 font-semibold text-right">Entry Price</th>
+                            <th class="px-6 py-4 font-semibold text-right">Current Price</th>
+                            <th class="px-6 py-4 font-semibold text-right">Total Value</th>
+                            <th class="px-6 py-4 font-semibold text-right">P&L</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700">
@@ -62,12 +63,13 @@
                             <td class="px-6 py-4 text-right">{{ p.quantity }}</td>
                             <td class="px-6 py-4 text-right">£{{ "{:,.2f}".format(p.entry_price) }}</td>
                             <td class="px-6 py-4 text-right">£{{ "{:,.2f}".format(p.current_price) }}</td>
+                            <td class="px-6 py-4 text-right font-semibold">£{{ "{:,.2f}".format(p.total_value) }}</td>
                             <td class="px-6 py-4 text-right {% if p.pnl_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">{{ "{:+.1f}%".format(p.pnl_pct) }}</td>
                         </tr>
                         {% endfor %}
                         {% else %}
                         <tr>
-                            <td colspan="5" class="px-6 py-8 text-center text-gray-500">No active positions</td>
+                            <td colspan="6" class="px-6 py-8 text-center text-gray-500">No active positions</td>
                         </tr>
                         {% endif %}
                     </tbody>
@@ -86,10 +88,10 @@
                         <tr class="bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wider">
                             <th class="px-6 py-4 font-semibold">Time</th>
                             <th class="px-6 py-4 font-semibold">Symbol</th>
-                            <th class="px-6 py-4 font-semibold">Action</th>
-                            <th class="px-6 py-4 font-semibold">Confidence</th>
-                            <th class="px-6 py-4 font-semibold">Status</th>
-                            <th class="px-6 py-4 font-semibold">Validation</th>
+                            <th class="px-6 py-4 font-semibold text-right">Action</th>
+                            <th class="px-6 py-4 font-semibold text-right">Confidence</th>
+                            <th class="px-6 py-4 font-semibold text-right">Status</th>
+                            <th class="px-6 py-4 font-semibold text-right">Validation</th>
                             <th class="px-6 py-4 font-semibold">Reasoning</th>
                         </tr>
                     </thead>

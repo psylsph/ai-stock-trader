@@ -41,6 +41,18 @@ class Position(Base):
     current_price: Mapped[float] = mapped_column(Float)
     unrealized_pnl: Mapped[float] = mapped_column(Float)
 
+    @property
+    def pnl_pct(self) -> float:
+        """Calculate P&L percentage."""
+        if self.entry_price == 0:
+            return 0.0
+        return ((self.current_price - self.entry_price) / self.entry_price) * 100
+
+    @property
+    def total_value(self) -> float:
+        """Calculate total position value."""
+        return self.quantity * self.current_price
+
     stock: Mapped["Stock"] = relationship(back_populates="positions")
 
 

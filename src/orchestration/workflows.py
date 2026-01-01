@@ -329,35 +329,77 @@ class TradingWorkflow:
             "recommendations": []
         }
 
-        for attempt in range(max_retries):
-            try:
-                analysis = await self.decision_engine.startup_analysis_with_prescreening(
-                    portfolio_summary=portfolio_summary,
-                    market_status=str(market_status),
-                    prescreened_tickers=top_10_stocks,
-                    rss_news_summary=news_summary,
-                    tools=self.tools
-                )
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = retry_delay * (attempt + 1)
-                    msg = (f"  Analysis attempt {attempt + 1}/{max_retries} failed: {e}. "
-                           f"Retrying in {delay}s...",)
-                    print(msg, end='', flush=True)
-                    await asyncio.sleep(delay)
-                else:
-                    print(f"\nAll {max_retries} attempts failed. Using fallback.")
-                    analysis = {
-                        "analysis_summary": f"Error during analysis: {str(e)}",
-                        "recommendations": []
-                    }
+        if self.settings.REMOTE_ONLY_MODE:
+            print("REMOTE_ONLY_MODE enabled - skipping local AI analysis")
+            analysis = {
+                "analysis_summary": "Remote-only mode: Skipped local AI analysis",
+                "recommendations": []
+            }
+        else:
+            for attempt in range(max_retries):
+                try:
+                    analysis = await self.decision_engine.startup_analysis_with_prescreening(
+                        portfolio_summary=portfolio_summary,
+                        market_status=str(market_status),
+                        prescreened_tickers=top_10_stocks,
+                        rss_news_summary=news_summary,
+                        tools=self.tools
+                    )
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        delay = retry_delay * (attempt + 1)
+                        msg = (f"  Analysis attempt {attempt + 1}/{max_retries} failed: {e}. "
+                               f"Retrying in {delay}s...",)
+                        print(msg, end='', flush=True)
+                        await asyncio.sleep(delay)
+                    else:
+                        print(f"\nAll {max_retries} attempts failed. Using fallback.")
+                        analysis = {
+                            "analysis_summary": f"Error during analysis: {str(e)}",
+                            "recommendations": []
+                        }
 
         print("\n" + "=" * 50)
         print(f"{'LOCAL AI ANALYSIS RESULT':^50}")
         print("=" * 50)
         print(json.dumps(analysis, indent=4))
         print("=" * 50 + "\n")
+
+        # 7a. If no BUY recommendations, ask remote AI
+        recommendations = analysis.get("recommendations", [])
+        buy_recommendations = [rec for rec in recommendations if rec.get("action") == "BUY" and rec.get("confidence", 0) >= 0.8]
+
+        if not buy_recommendations:
+            print("No BUY recommendations from local AI (with >= 80% confidence). Querying remote AI...")
+            try:
+                remote_analysis = await self.decision_engine.request_remote_recommendations(
+                    portfolio_summary=portfolio_summary,
+                    market_status=str(market_status),
+                    prescreened_tickers=top_10_stocks,
+                    rss_news_summary=news_summary
+                )
+                print("\n" + "=" * 50)
+                print(f"{'REMOTE AI ANALYSIS RESULT':^50}")
+                print("=" * 50)
+                print(json.dumps(remote_analysis, indent=4))
+                print("=" * 50 + "\n")
+
+                remote_recommendations = remote_analysis.get("recommendations", [])
+                if remote_recommendations:
+                    # Mark recommendations as from_remote so they skip validation
+                    for rec in remote_recommendations:
+                        rec["from_remote"] = True
+                    # Merge remote recommendations into local analysis
+                    recommendations = recommendations + remote_recommendations
+                    analysis["recommendations"] = recommendations
+                    print(f"Added {len(remote_recommendations)} remote recommendations")
+
+                    # Re-check for BUY recommendations after adding remote ones
+                    buy_recommendations = [rec for rec in recommendations if rec.get("action") == "BUY" and rec.get("confidence", 0) >= 0.8]
+                    print(f"Total BUY recommendations after remote merge: {len(buy_recommendations)}")
+            except Exception as e:
+                print(f"Failed to get remote recommendations: {e}")
 
         # 7. Execute Recommendations with Remote Validation
         recommendations = analysis.get("recommendations", [])
@@ -381,6 +423,11 @@ class TradingWorkflow:
                     print(f"Ignoring low-confidence {action} for {symbol} ({rec['confidence']})")
                     continue
 
+                # Skip BUY if already bought today (BUY once per day rule)
+                if action == "BUY" and await self.repo.was_bought_today(symbol):
+                    print(f"Ignoring BUY for {symbol} (already bought today)")
+                    continue
+
                 # Log local decision
                 local_decision_record = AIDecision(
                     ai_type="local",
@@ -393,7 +440,51 @@ class TradingWorkflow:
                 )
                 await self.repo.log_decision(local_decision_record)
 
-                if rec["action"] in ["BUY", "SELL"]:
+                # For HOLD decisions on existing positions, mark as completed immediately
+                if action == "HOLD":
+                    await self.repo.update_decision_with_validation(
+                        symbol=symbol,
+                        remote_validation_decision="PROCEED",
+                        remote_validation_comments="HOLD - no action required",
+                        requires_manual_review=False
+                    )
+                    continue
+
+                # Skip validation for recommendations already from remote AI
+                if rec.get("from_remote"):
+                    print(f"\nRemote AI recommendation: {rec['action']} for {rec['symbol']} (skipping additional validation)")
+                    validation = {"decision": "PROCEED", "comments": "From remote AI - already validated"}
+
+                    # Log validation results for remote AI recommendations
+                    await self.repo.update_decision_with_validation(
+                        symbol=rec["symbol"],
+                        remote_validation_decision="PROCEED",
+                        remote_validation_comments="From remote AI - already validated",
+                        requires_manual_review=self.settings.TRADING_MODE == "live" and not self.settings.IGNORE_MARKET_HOURS,
+                        new_confidence=rec.get("confidence")
+                    )
+
+                    if market_status.is_open or self.settings.IGNORE_MARKET_HOURS:
+                        print(f"[DEBUG] Market open={market_status.is_open}, IGNORE_MARKET_HOURS={self.settings.IGNORE_MARKET_HOURS} - proceeding with trade")
+                        # Re-fetch balance and positions for latest portfolio state
+                        current_balance = await self.broker.get_account_balance()
+                        current_positions = await self.broker.get_positions()
+
+                        # Calculate total portfolio value for risk management
+                        total_value = current_balance
+                        for p in current_positions:
+                            p_quote = await self.market_data.get_quote(p["symbol"])
+                            total_value += p["quantity"] * p_quote.price
+
+                        print(f"[DEBUG] Executing trade: balance={current_balance}, total_value={total_value}")
+                        success = await self._execute_trade(rec, validation, total_value)
+                        print(f"[DEBUG] Trade execution result: success={success}")
+                        if success:
+                            await self.repo.mark_decision_executed(rec["symbol"])
+                    else:
+                        print(f"Market CLOSED: Recommendation for {rec['symbol']} will be held as PLANNED.")
+
+                elif rec["action"] in ["BUY", "SELL"]:
                     print(f"\nValidating {rec['action']} for {rec['symbol']} with Remote AI...")
 
                     validation = await self.decision_engine.validate_with_remote_ai(
@@ -413,7 +504,8 @@ class TradingWorkflow:
                         symbol=rec["symbol"],
                         remote_validation_decision=validation["decision"],
                         remote_validation_comments=validation.get("comments", ""),
-                        requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED" and not self.settings.IGNORE_MARKET_HOURS
+                        requires_manual_review=self.settings.TRADING_MODE == "live" and validation["decision"] == "PROCEED" and not self.settings.IGNORE_MARKET_HOURS,
+                        new_confidence=validation.get("new_confidence")
                     )
 
                     if validation["decision"] in ["PROCEED", "MODIFY"]:
@@ -428,17 +520,20 @@ class TradingWorkflow:
                             continue
 
                         if market_status.is_open or self.settings.IGNORE_MARKET_HOURS:
+                            print(f"[DEBUG] Market open={market_status.is_open}, IGNORE_MARKET_HOURS={self.settings.IGNORE_MARKET_HOURS} - proceeding with trade")
                             # Re-fetch balance and positions for latest portfolio state
                             current_balance = await self.broker.get_account_balance()
                             current_positions = await self.broker.get_positions()
-                            
+
                             # Calculate total portfolio value for risk management
                             total_value = current_balance
                             for p in current_positions:
                                 p_quote = await self.market_data.get_quote(p["symbol"])
                                 total_value += p["quantity"] * p_quote.price
 
+                            print(f"[DEBUG] Executing trade: balance={current_balance}, total_value={total_value}")
                             success = await self._execute_trade(target_rec, validation, total_value)
+                            print(f"[DEBUG] Trade execution result: success={success}")
                             if success:
                                 await self.repo.mark_decision_executed(rec["symbol"])
                         else:
@@ -509,6 +604,12 @@ class TradingWorkflow:
                 # Reconstruct rec and validation from decision context
                 rec = decision.context.get("rec") if decision.context else None
                 if not rec:
+                    continue
+
+                # Skip BUY if already bought today (BUY once per day rule)
+                if rec.get("action") == "BUY" and await self.repo.was_bought_today(rec.get("symbol")):
+                    print(f"Ignoring pending BUY for {rec.get('symbol')} (already bought today)")
+                    await self.repo.mark_decision_executed(decision.symbol)
                     continue
                 
                 validation = {
@@ -686,6 +787,15 @@ class TradingWorkflow:
                             requires_manual_review=self.settings.TRADING_MODE == "live" and final_action == "SELL" and not self.settings.IGNORE_MARKET_HOURS
                         )
                         await self.repo.log_decision(monitoring_decision)
+
+                        # For HOLD decisions, mark as completed immediately (no validation needed)
+                        if final_action == "HOLD":
+                            await self.repo.update_decision_with_validation(
+                                symbol=position.stock.symbol,
+                                remote_validation_decision="PROCEED",
+                                remote_validation_comments="HOLD - no action required",
+                                requires_manual_review=False
+                            )
 
                         print(f"--- Decision for {position.stock.symbol} ---")
                         print(json.dumps(decision, indent=4))
